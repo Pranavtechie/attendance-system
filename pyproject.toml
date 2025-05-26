@@ -6,5 +6,5 @@ readme = "README.md"
 requires-python = "==3.10.17"
 dependencies = [
     "opencv-python>=4.11.0.86",
-    "pyqt6>=6.9.0",
+    "pyside6>=6.9.0",
 ]
