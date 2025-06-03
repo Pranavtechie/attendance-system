@@ -94,7 +94,7 @@ class AnchorBoxes:
         
         num_layers = len(self.feature_map_sizes)
         scales = [self.min_scale + (self.max_scale - self.min_scale) * i / (num_layers - 1)
-                  for i in range(num_layers)]
+                for i in range(num_layers)]
         scales[num_layers - 1] = (scales[num_layers - 1] + 1.0) / 2.0
 
 
@@ -260,7 +260,7 @@ def postprocess_blazeface_output(regressors, classificators, original_image_shap
     global blaze_face_anchors
     if blaze_face_anchors is None:
         blaze_face_anchors = AnchorBoxes(input_size=BLAZEFACE_INPUT_SIZE,
-                                         min_scale=0.1484375, max_scale=0.75)
+                                        min_scale=0.1484375, max_scale=0.75)
 
     # Ensure regressors and classificators are numpy arrays (remove batch dim)
     raw_regressors = regressors[0] # Shape (896, 16)
@@ -450,18 +450,8 @@ if __name__ == "__main__":
     # --- IMPORTANT: Replace these with paths to REAL images of faces ---
     person1_image_path = os.path.join(enrollment_image_dir, "person1_alice.jpg")
     person2_image_path = os.path.join(enrollment_image_dir, "person2_bob.jpg")
+    person3_image_path = os.path.join(enrollment_image_dir, "person3_pranav.jpg")
     
-    # Dummy image creation and warning (remove this part once you have real images)
-    if not os.path.exists(person1_image_path):
-        dummy_img = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(dummy_img, "PLACE REAL FACE IMAGE HERE!", (100, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        cv2.imwrite(person1_image_path, dummy_img)
-        cv2.imwrite(person2_image_path, dummy_img)
-        print(f"\nIMPORTANT: Please put real face images at '{person1_image_path}' and '{person2_image_path}' for proper testing.")
-        print("Using dummy images will result in 'No face detected' unless a face happens to align.")
-        print("Proceeding with dummy images for now, but results will be inaccurate.")
-        time.sleep(3) # Give user time to read the warning
-
     print("\n--- Starting Enrollment Test (with proper BlazeFace decoder) ---")
     
     # Clear existing FAISS data for a clean test run if needed
@@ -480,7 +470,8 @@ if __name__ == "__main__":
     # Try enrolling users. Use your actual image paths here.
     enroll_user("Alice Smith", person1_image_path)
     enroll_user("Bob Johnson", person2_image_path)
-    enroll_user("Alice Smith", person1_image_path) # Test duplicate enrollment
+    enroll_user("Mandava Pranav", person3_image_path)
+    # enroll_user("Alice Smith", person1_image_path) # Test duplicate enrollment
 
     # Verify FAISS index and user map
     faiss_index, user_id_map = load_faiss_data()

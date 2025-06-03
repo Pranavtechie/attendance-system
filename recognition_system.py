@@ -18,7 +18,7 @@ BLAZEFACE_INPUT_SIZE = (128, 128) # W, H
 MOBILEFACENET_INPUT_SIZE = (112, 112) # W, H
 
 # --- Recognition Thresholds ---
-RECOGNITION_THRESHOLD = 0.80 # Cosine similarity threshold for recognition (adjust as needed)
+RECOGNITION_THRESHOLD = 0.75 # Cosine similarity threshold for recognition (adjust as needed)
 MIN_DETECTION_SCORE = 0.7   # Minimum score for BlazeFace detection to be considered a face
 
 # --- TensorFlow Lite Interpreter Loaders ---
@@ -78,7 +78,7 @@ class AnchorBoxes:
         anchors = []
         num_layers = len(self.feature_map_sizes)
         scales = [self.min_scale + (self.max_scale - self.min_scale) * i / (num_layers - 1)
-                  for i in range(num_layers)]
+                for i in range(num_layers)]
         scales[num_layers - 1] = (scales[num_layers - 1] + 1.0) / 2.0
 
         for layer_idx, (fm_h, fm_w) in enumerate(self.feature_map_sizes):
@@ -189,7 +189,7 @@ def postprocess_blazeface_output(regressors, classificators, original_image_shap
     global blaze_face_anchors
     if blaze_face_anchors is None:
         blaze_face_anchors = AnchorBoxes(input_size=BLAZEFACE_INPUT_SIZE,
-                                         min_scale=0.1484375, max_scale=0.75)
+                                        min_scale=0.1484375, max_scale=0.75)
 
     raw_regressors = regressors[0]
     raw_classificators = classificators[0]
