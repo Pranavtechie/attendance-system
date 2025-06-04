@@ -11,6 +11,7 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "peewee>=3.18.1",
     "pyside6>=6.9.0",
+    "pygame>=2.5.0",
     "requests>=2.32.3",
     "tensorflow",
 ]
