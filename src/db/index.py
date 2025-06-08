@@ -24,10 +24,16 @@ class SyncValidator(Model):
     syncHash = CharField()
     syncTimestamp = DateTimeField()
 
+    class Meta:
+        database = db
+
 class CadetAttendance(Model):
     uniqueId = CharField()
     attendanceTimeStamp = DateTimeField()
     session = CharField()
+
+    class Meta:
+        database = db   
 
 if __name__ == "__main__":
     print('something happened')

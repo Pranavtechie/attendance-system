@@ -1,206 +1,166 @@
 import os
 import cv2
 import numpy as np
-import sqlite3
 import faiss
+import uuid # For generating default uniqueId if needed (though model default is better)
+import sys
+
+# --- Add project root to sys.path for Peewee model imports ---
+PROJECT_ROOT_EP = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if PROJECT_ROOT_EP not in sys.path:
+    sys.path.append(PROJECT_ROOT_EP)
+try:
+    from src.db.index import db as peewee_db_ep, Cadet
+except ImportError as e:
+    print(f"CRITICAL ERROR in enrollment_processor.py: Could not import Peewee models: {e}")
+    raise
 
 # --- Import from the central recognition_system ---
 from .recognition_system import (
     TFLiteModel,
-    preprocess_image_blazeface,
+    preprocess_image_blazeface, # Keeping BlazeFace for now
     preprocess_image_mobilefacenet,
-    postprocess_blazeface_output,
-    BLAZEFACE_MODEL_PATH,
+    postprocess_blazeface_output, # Keeping BlazeFace for now
+    BLAZEFACE_MODEL_PATH,         # Keeping BlazeFace for now
     MOBILEFACENET_MODEL_PATH,
     EMBEDDING_DIM,
-    MIN_DETECTION_SCORE
+    MIN_DETECTION_SCORE          # Keeping BlazeFace for now
 )
 
-# --- Paths specific to enrollment data management (DB, FAISS index) ---
+# --- Paths ---
 CORE_DIR_EP = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT_EP = os.path.dirname(CORE_DIR_EP)
+FAISS_INDEX_PATH_EP = os.path.join(CORE_DIR_EP, "faiss_index.bin")
+USER_ID_MAP_PATH_EP = os.path.join(CORE_DIR_EP, "faiss_user_id_map.npy") # Will store UUID strings
 
-DB_PATH_EP = os.path.join(PROJECT_ROOT_EP, "attendance_system.db")
-FAISS_INDEX_PATH_EP = os.path.join(CORE_DIR_EP, "faiss_index.bin") # Shared with recognition
-USER_ID_MAP_PATH_EP = os.path.join(CORE_DIR_EP, "faiss_user_id_map.npy") # Shared
-
-# --- Model Instances for Enrollment (loaded on demand) ---
 _blazeface_model_enroll_instance = None
 _mobilefacenet_model_enroll_instance = None
 
-def get_enrollment_blazeface_model():
+def get_enrollment_blazeface_model(): # Keeping BlazeFace
     global _blazeface_model_enroll_instance
     if _blazeface_model_enroll_instance is None:
         _blazeface_model_enroll_instance = TFLiteModel(BLAZEFACE_MODEL_PATH)
-        print("BlazeFace model loaded for enrollment.")
     return _blazeface_model_enroll_instance
 
 def get_enrollment_mobilefacenet_model():
     global _mobilefacenet_model_enroll_instance
     if _mobilefacenet_model_enroll_instance is None:
         _mobilefacenet_model_enroll_instance = TFLiteModel(MOBILEFACENET_MODEL_PATH)
-        print("MobileFaceNet model loaded for enrollment.")
     return _mobilefacenet_model_enroll_instance
 
-# --- Database Initialization (specific to enrollment needs: adding columns) ---
-def init_enrollment_db():
-    """Initializes the users table, ensuring new columns exist."""
-    conn = None
+def init_enrollment_db_peewee():
     try:
-        conn = sqlite3.connect(DB_PATH_EP)
-        cursor = conn.cursor()
-        
-        # Check current columns
-        cursor.execute("PRAGMA table_info(users)")
-        existing_columns = [info[1] for info in cursor.fetchall()]
-
-        if 'admissionNumber' not in existing_columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN admissionNumber TEXT")
-            print("Added 'admissionNumber' column to users table.")
-        if 'room' not in existing_columns:
-            cursor.execute("ALTER TABLE users ADD COLUMN room TEXT")
-            print("Added 'room' column to users table.")
-
-        # Create table if it doesn't exist (idempotent)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                admissionNumber TEXT,
-                room TEXT
-            )
-        ''')
-        conn.commit()
-        print("Users table schema ensured for enrollment.")
-    except sqlite3.Error as e: # Catch specific sqlite errors
-        print(f"DB schema update/check error: {e}")
-        if conn: conn.rollback()
+        peewee_db_ep.connect(reuse_if_open=True)
+        # Cadet table creation is handled by src.db.index, just ensure connection
+        if not Cadet.table_exists(): # Optional check, create_tables safe=True handles it
+             from src.db.index import Room, SyncValidator, CadetAttendance # Import others if needed for full init
+             peewee_db_ep.create_tables([Cadet, Room, SyncValidator, CadetAttendance], safe=True)
+        print("Peewee Cadet table ensured for enrollment.")
+    except Exception as e: print(f"Error Peewee DB init for enrollment: {e}")
     finally:
-        if conn:
-            conn.close()
+        if not peewee_db_ep.is_closed(): peewee_db_ep.close()
 
-# --- FAISS Data Handling for Enrollment (WRITE operations) ---
 def load_faiss_for_enrollment():
-    """Loads FAISS index and map for enrollment, or creates new if not found/corrupt."""
     if os.path.exists(FAISS_INDEX_PATH_EP) and os.path.exists(USER_ID_MAP_PATH_EP):
         try:
-            index = faiss.read_index(FAISS_INDEX_PATH_EP)
-            user_id_map_array = np.load(USER_ID_MAP_PATH_EP, allow_pickle=True)
-            user_id_map = user_id_map_array.tolist() if user_id_map_array.ndim > 0 else []
-            # Basic validation: if index has items, map should roughly correspond
-            if index.ntotal == len(user_id_map) or (index.ntotal == 0 and not user_id_map):
-                print(f"FAISS for enrollment: {index.ntotal} vectors, map: {len(user_id_map)} entries.")
-                return index, user_id_map
-            else:
-                print(f"FAISS index/map mismatch for enrollment. Index: {index.ntotal}, Map: {len(user_id_map)}. Re-initializing.")
-        except Exception as e: # Catch broad exceptions during load
-            print(f"Error loading FAISS for enrollment: {e}. Creating new.")
-    
-    print("Creating new FAISS index (FlatIP) and map for enrollment.")
-    index = faiss.IndexFlatIP(EMBEDDING_DIM)
-    user_id_map = []
-    return index, user_id_map
+            index=faiss.read_index(FAISS_INDEX_PATH_EP)
+            # user_id_map now stores UUID strings
+            user_id_map=np.load(USER_ID_MAP_PATH_EP,allow_pickle=True).tolist()
+            if index.ntotal==len(user_id_map) or (index.ntotal==0 and not user_id_map): return index,user_id_map
+        except Exception as e: print(f"Err loading FAISS for enroll: {e}. Creating new.")
+    return faiss.IndexFlatIP(EMBEDDING_DIM),[]
 
-def save_faiss_after_enrollment(index, user_id_map):
-    """Saves the FAISS index and user ID map after enrollment."""
+def save_faiss_after_enrollment(index, user_id_map_uuids):
     faiss.write_index(index, FAISS_INDEX_PATH_EP)
-    np.save(USER_ID_MAP_PATH_EP, np.array(user_id_map, dtype=object)) # dtype=object for list of ints
-    print("FAISS index and user ID map saved after enrollment update.")
+    np.save(USER_ID_MAP_PATH_EP, np.array(user_id_map_uuids, dtype=object)) # Stores array of Python strings
+    print(f"FAISS index and UUID map saved. Map length: {len(user_id_map_uuids)}")
 
-# --- High-Level Enrollment Function ---
-def enroll_new_user(name, admission_number, room, image_path):
-    blazeface_model = get_enrollment_blazeface_model()
+def enroll_new_user(unique_id_uuid_str, name, admission_number, room_name, image_path):
+    blazeface_model = get_enrollment_blazeface_model() # Keeping BlazeFace
     mobilefacenet_model = get_enrollment_mobilefacenet_model()
 
-    if not os.path.exists(image_path):
-        return False, f"Image path does not exist: {image_path}", None
-    
+    if not os.path.exists(image_path): return False, f"Img path missing: {image_path}", None
     image = cv2.imread(image_path)
-    if image is None:
-        return False, f"Could not read image from {image_path}", None
+    if image is None: return False, f"Cannot read img: {image_path}", None
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-    # 1. Face Detection
+    # 1. Face Detection (Keeping BlazeFace active for now)
     input_blaze = preprocess_image_blazeface(image_rgb)
     det_outputs = blazeface_model.run(input_blaze)
-    # Using MIN_DETECTION_SCORE from recognition_system
-    faces_found = postprocess_blazeface_output(det_outputs[0], det_outputs[1], image_rgb.shape, 
+    faces_found = postprocess_blazeface_output(det_outputs[0], det_outputs[1], image_rgb.shape,
                                                score_threshold=MIN_DETECTION_SCORE)
+    if not faces_found: return False, "No face detected for enrollment.", None
+    if len(faces_found) > 1: return False, "Multiple faces detected. Use single clear face.", None
+    x1,y1,x2,y2 = faces_found[0]['bbox']
+    if x2<=x1 or y2<=y1: return False, "Invalid face bbox for enrollment.", None
+    face_roi = image_rgb[y1:y2,x1:x2]
+    if face_roi.size == 0: return False, "Face ROI empty for enrollment.", None
+    # End of Face Detection
 
-    if not faces_found:
-        return False, "No face detected in the enrollment image.", None
-    if len(faces_found) > 1:
-        # Sort by score and pick the highest one, or reject if strict single-face policy
-        # For now, let's be strict for enrollment:
-        # faces_found = sorted(faces_found, key=lambda x: x['score'], reverse=True)
-        return False, "Multiple faces detected. Please use an image with a single clear face.", None
-    
-    best_face = faces_found[0]
-    x1, y1, x2, y2 = best_face['bbox']
-
-    if x2 <= x1 or y2 <= y1:
-        return False, "Invalid bounding box detected for enrollment.", None
-    face_roi = image_rgb[y1:y2, x1:x2]
-    if face_roi.size == 0:
-        return False, "Face ROI is empty after cropping for enrollment.", None
-
-    # 2. Embedding Extraction
     input_mfn = preprocess_image_mobilefacenet(face_roi)
-    embedding_out = mobilefacenet_model.run(input_mfn)[0].flatten().astype(np.float32)
-    embedding_normalized = embedding_out / np.linalg.norm(embedding_out)
+    emb_out = mobilefacenet_model.run(input_mfn)[0].flatten().astype(np.float32)
+    emb_norm = emb_out / np.linalg.norm(emb_out)
 
-    # 3. Store in SQLite
-    user_id = None
-    conn = None
+    cadet_uuid_to_store = unique_id_uuid_str # This is the UUID from input
     try:
-        conn = sqlite3.connect(DB_PATH_EP)
-        cursor = conn.cursor()
-        # Attempt to insert; if name is UNIQUE and exists, it will raise IntegrityError
-        cursor.execute("INSERT INTO users (name, admissionNumber, room) VALUES (?, ?, ?)",
-                       (name, admission_number, room))
-        user_id = cursor.lastrowid
-        conn.commit()
-        print(f"User '{name}' (Adm: {admission_number}) added to DB with user_id: {user_id}")
-    except sqlite3.IntegrityError: # Likely due to UNIQUE constraint on name
-        if conn: conn.rollback()
-        print(f"User '{name}' likely already exists. Updating details and fetching ID.")
-        # Need a new connection or ensure cursor is valid after rollback for further operations
-        if conn: conn.close() # Close and reopen or handle cursor state carefully
-        conn = sqlite3.connect(DB_PATH_EP)
-        cursor = conn.cursor()
-        cursor.execute("UPDATE users SET admissionNumber = ?, room = ? WHERE name = ?",
-                       (admission_number, room, name))
-        conn.commit() # Commit the update
-        cursor.execute("SELECT user_id FROM users WHERE name = ?", (name,))
-        res = cursor.fetchone()
-        if res:
-            user_id = res[0]
-            print(f"Updated details for existing user '{name}', user_id: {user_id}")
-        else: # Should not happen if IntegrityError was on name
-            if conn: conn.close()
-            return False, "DB error: Failed to retrieve user_id for existing user after name conflict.", None
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        if conn: conn.close()
-        return False, f"Database error during enrollment: {e}", None
-    finally:
-        if conn:
-            conn.close()
+        peewee_db_ep.connect(reuse_if_open=True)
+        # Check if cadet with this unique_id_uuid_str (PK) exists
+        existing_cadet = Cadet.get_or_none(Cadet.uniqueId == cadet_uuid_to_store)
+        if existing_cadet:
+            print(f"Cadet UUID '{cadet_uuid_to_store}' exists. Updating.")
+            existing_cadet.name = name
+            existing_cadet.admissionNumber = admission_number # Ensure this doesn't conflict if also unique
+            existing_cadet.roomName = room_name
+            try:
+                existing_cadet.save()
+            except Exception as save_e: # Catch potential IntegrityError if admissionNumber conflicts
+                print(f"Error updating existing cadet {cadet_uuid_to_store} (possibly admNo conflict): {save_e}")
+                # Decide how to handle: overwrite admNo for this UUID, or fail?
+                # For now, let's assume if UUID matches, we update. If admNo is supposed to be globally unique,
+                # this might need more logic to handle conflicts if an existing cadet has the NEW admNo.
+                # Simplest: try to update, if fails on admNo, report specific error.
+                # A check for Cadet.admissionNumber == admission_number AND Cadet.uniqueId != cadet_uuid_to_store
+                # could be done beforehand.
+                return False, f"DB Error: Could not update existing cadet, possibly admission number conflict: {save_e}", None
 
-    if user_id is None:
-        return False, "Failed to obtain user_id from database for enrollment.", None
-
-    # 4. Store in FAISS
-    # For re-enrollment, a more robust strategy would remove old embeddings for this user_id.
-    # Current simple append might lead to multiple embeddings for the same user_id in FAISS.
-    faiss_idx, id_map = load_faiss_for_enrollment()
-    faiss_idx.add(embedding_normalized.reshape(1, -1))
-    id_map.append(int(user_id)) # Ensure user_id is int
-    
-    try:
-        save_faiss_after_enrollment(faiss_idx, id_map)
+        else: # Cadet with this uniqueId does not exist, create new
+            # Check if admissionNumber itself is already taken by another Cadet
+            cadet_with_same_adm_no = Cadet.get_or_none(Cadet.admissionNumber == admission_number)
+            if cadet_with_same_adm_no:
+                print(f"Error: Admission Number '{admission_number}' already taken by Cadet UUID '{cadet_with_same_adm_no.uniqueId}'.")
+                return False, f"Admission Number '{admission_number}' already exists for another cadet.", None
+            
+            print(f"Creating new cadet. UUID: {cadet_uuid_to_store}, AdmNo: {admission_number}")
+            Cadet.create(
+                uniqueId=cadet_uuid_to_store, # Using provided UUID
+                name=name,
+                admissionNumber=admission_number,
+                roomName=room_name
+            )
+        print(f"Cadet DB op for UUID '{cadet_uuid_to_store}' successful.")
     except Exception as e:
-        # DB part was successful, but FAISS save failed. This is a partial success/failure state.
-        return False, f"User info saved to DB (ID: {user_id}), but failed to save FAISS data: {e}", user_id
+        print(f"Peewee DB error for enroll: {e}")
+        return False, f"Database error: {e}", None
+    finally:
+        if not peewee_db_ep.is_closed(): peewee_db_ep.close()
 
-    return True, f"User '{name}' enrolled successfully with user_id: {user_id}", user_id
+    faiss_idx, id_map_uuids = load_faiss_for_enrollment()
+    temp_embeddings = []; temp_map = []
+    if faiss_idx.ntotal > 0:
+        all_embeddings = faiss_idx.reconstruct_n(0, faiss_idx.ntotal)
+        for i in range(faiss_idx.ntotal):
+            if id_map_uuids[i] != cadet_uuid_to_store: # Compare UUID strings
+                temp_embeddings.append(all_embeddings[i])
+                temp_map.append(id_map_uuids[i])
+    if temp_embeddings:
+        faiss_idx.reset(); faiss_idx.add(np.array(temp_embeddings,dtype=np.float32)); id_map_uuids = temp_map
+    else:
+        faiss_idx.reset(); id_map_uuids = []
+    print(f"FAISS index updated for Cadet UUID {cadet_uuid_to_store}. Old entries removed/updated.")
+
+    faiss_idx.add(emb_norm.reshape(1,-1))
+    id_map_uuids.append(cadet_uuid_to_store) # Append UUID string
+    try:
+        save_faiss_after_enrollment(faiss_idx, id_map_uuids)
+    except Exception as e:
+        return False, f"DB saved (UUID:{cadet_uuid_to_store}), FAISS save failed: {e}", cadet_uuid_to_store
+    return True, f"Cadet '{name}' (UUID:{cadet_uuid_to_store}) enrolled.", cadet_uuid_to_store

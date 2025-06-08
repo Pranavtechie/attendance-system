@@ -2,6 +2,7 @@ import os
 import cv2 # For creating dummy images
 import sys
 import numpy as np # For creating dummy images
+import uuid
 
 # --- Add src to Python path to allow direct import from src.core ---
 # This is one way to handle imports when running a script from the project root.
@@ -13,9 +14,9 @@ if SRC_DIR_SCRIPT not in sys.path:
 # --- End of sys.path modification ---
 
 try:
-    from core.enrollment_processor import enroll_new_user, init_enrollment_db
+    from core.enrollment_processor import enroll_new_user, init_enrollment_db_peewee
     # To access FAISS_INDEX_PATH_EP etc. if needed for manual cleanup, not typically required by test script
-    from core.enrollment_processor import FAISS_INDEX_PATH_EP, USER_ID_MAP_PATH_EP, DB_PATH_EP
+    from src.db.index import db as main_peewee_db, Cadet, Room, SyncValidator, CadetAttendance
 except ImportError as e:
     print(f"Failed to import from src.core.enrollment_processor: {e}")
     print("Ensure you are running this script from the project root, or PYTHONPATH is set correctly.")
@@ -25,25 +26,38 @@ except ImportError as e:
 if __name__ == "__main__":
     print("Running enrollment test script using src.core.enrollment_processor...")
 
-    # 1. Initialize/Update DB schema
-    init_enrollment_db()
+    # 1. Initialize Peewee DB schema (connects, creates tables, closes)
+    print("Initializing Peewee database schema (people.db)...")
+    try:
+        main_peewee_db.connect(reuse_if_open=True)
+        main_peewee_db.create_tables([Cadet, Room, SyncValidator, CadetAttendance], safe=True)
+        print("Schema ensured.")
+    except Exception as e_db_init:
+        print(f"Error during main DB init: {e_db_init}")
+    finally:
+        if not main_peewee_db.is_closed(): main_peewee_db.close()
+    
+    # Call the specific enrollment DB init (might be redundant if above is comprehensive)
+    init_enrollment_db_peewee()
 
     # 2. Prepare enrollment images directory
-    enrollment_images_dir = os.path.join(PROJECT_ROOT_SCRIPT, "enrollment_images")
+    enrollment_images_dir = os.path.join(os.path.dirname(PROJECT_ROOT_SCRIPT), "enrollment_images")
     os.makedirs(enrollment_images_dir, exist_ok=True)
+
 
     # 3. Define test user data and image paths
     #    IMPORTANT: For real tests, use actual images with clear faces.
     #    These dummy images will likely fail face detection.
     test_users = [
-        {"name": "Alice Wonderland", "adm": "ADM001", "room": "GRYFF", "img": "alice.jpg"},
-        {"name": "Bob The Builder", "adm": "ADM002", "room": "SLYTH", "img": "bob.jpg"},
-        {"name": "Charlie Brown", "adm": "ADM003", "room": "HUFFL", "img": "charlie.jpg"},
+        {"uid": str(uuid.uuid4()),"name": "Alice Wonderland", "adm": "ADM001", "room": "GRYFF", "img": "person1_alice.jpg"},
+        {"uid": str(uuid.uuid4()),"name": "Bob The Builder", "adm": "ADM002", "room": "SLYTH", "img": "person2_bob.jpg"},
+        {"uid": str(uuid.uuid4()),"name": "Pranav", "adm": "ADM003", "room": "HUFFL", "img": "person3_pranav.jpg"},
     ]
 
     # Create dummy images if they don't exist (these will NOT work for actual enrollment)
     for user_data in test_users:
         img_path = os.path.join(enrollment_images_dir, user_data["img"])
+        print(img_path)
         if not os.path.exists(img_path):
             # Create a very basic dummy image. Real face detection will fail on this.
             dummy_cv_image = np.random.randint(0, 255, (200, 200, 3), dtype=np.uint8)
@@ -51,45 +65,43 @@ if __name__ == "__main__":
             cv2.imwrite(img_path, dummy_cv_image)
             print(f"Created dummy image for testing: {img_path}")
 
-    # --- Optional: Clean up FAISS and DB for a fresh test run ---
-    # print("\n--- WARNING: Optionally clearing previous enrollment data for fresh test ---")
-    # if os.path.exists(FAISS_INDEX_PATH_EP): os.remove(FAISS_INDEX_PATH_EP)
-    # if os.path.exists(USER_ID_MAP_PATH_EP): os.remove(USER_ID_MAP_PATH_EP)
-    # try:
-    #     conn_cleanup = sqlite3.connect(DB_PATH_EP)
-    #     cursor_cleanup = conn_cleanup.cursor()
-    #     cursor_cleanup.execute("DELETE FROM users")
-    #     conn_cleanup.commit()
-    #     conn_cleanup.close()
-    #     print("Cleared 'users' table in attendance_system.db.")
-    # except sqlite3.Error as e:
-    #     print(f"Error clearing DB: {e}")
-    # print("--- End of optional cleanup ---\n")
+    # --- Optional: Cleanup for fresh run ---
+    print("\n--- Optional: Clearing FAISS and Cadet table for fresh test ---")
+    try:
+        if os.path.exists(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_index.bin")):
+            os.remove(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_index.bin"))
+        if os.path.exists(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_user_id_map.npy")):
+            os.remove(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_user_id_map.npy"))
+        main_peewee_db.connect(reuse_if_open=True)
+        Cadet.delete().execute() # Clear all cadets
+        print("FAISS files removed (if existed) and Cadet table cleared.")
+    except Exception as e_clean: print(f"Error during cleanup: {e_clean}")
+    finally:
+        if not main_peewee_db.is_closed(): main_peewee_db.close()
     # --- End of optional cleanup ---
 
 
     # 4. Perform enrollments
-    for user_data in test_users:
-        print(f"\nAttempting to enroll: {user_data['name']}")
-        image_full_path = os.path.join(enrollment_images_dir, user_data["img"])
-        success, message, user_id = enroll_new_user(
-            user_data["name"],
-            user_data["adm"],
-            user_data["room"],
-            image_full_path
+    for user in test_users:
+        print(f"\nEnrolling: {user['name']} (UUID: {user['uid']})")
+        img_full_p = os.path.join(enrollment_images_dir, user["img"])
+        success, msg, stored_uid = enroll_new_user(
+            user['uid'], user['name'], user['adm'], user['room'], img_full_p
         )
-        print(f"Enrollment for {user_data['name']}: Success={success}, Msg='{message}', UserID={user_id}")
+        print(f"Enrollment for {user['name']}: Success={success}, Msg='{msg}', StoredID='{stored_uid}'")
 
     # 5. Test re-enrollment (update details for an existing user by name)
-    print(f"\nAttempting to re-enroll/update: {test_users[0]['name']}")
-    image_full_path_reenroll = os.path.join(enrollment_images_dir, test_users[0]["img"])
-    success, message, user_id = enroll_new_user(
-        test_users[0]["name"], # Same name
-        "ADM001_NEW",         # New admission number
-        "GRYFF_ANNEX",        # New room
-        image_full_path_reenroll
-    )
-    print(f"Re-enrollment for {test_users[0]['name']}: Success={success}, Msg='{message}', UserID={user_id}")
+    if test_users:
+        first_user = test_users[0]
+        print(f"\nRe-enrolling/updating: {first_user['name']} (UUID: {first_user['uid']}) with new details")
+        img_full_p_re = os.path.join(enrollment_images_dir, first_user["img"]) # Using same image for test
+        success, msg, stored_uid = enroll_new_user(
+            first_user['uid'], # Same UUID
+            f"{first_user['name']} Updated", # New Name
+            f"{first_user['adm']}_U", # New AdmNo
+            f"{first_user['room']}_U", # New Room
+            img_full_p_re
+        )
+        print(f"Re-enrollment for {first_user['name']}: Success={success}, Msg='{msg}', StoredID='{stored_uid}'")
 
-
-    print("\n--- Enrollment test script finished ---")
+    print("\n--- Enrollment test script with Peewee and UUIDs finished ---")
