@@ -3,19 +3,12 @@ import cv2
 import numpy as np
 import os
 import pygame
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QLabel, QFrame, QScrollArea)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea)
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap, QFont
 
 # Import recognition system functions
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from recognition_system import (
-    TFLiteModel, load_faiss_data, preprocess_image_blazeface,
-    preprocess_image_mobilefacenet, postprocess_blazeface_output,
-    recognize_face, BLAZEFACE_MODEL_PATH, MOBILEFACENET_MODEL_PATH,
-    MIN_DETECTION_SCORE
-)
+from core.recognition_system import FaceRecognitionSystem, MIN_DETECTION_SCORE
 
 class AttendanceUI(QMainWindow):
     def __init__(self):
@@ -31,59 +24,16 @@ class AttendanceUI(QMainWindow):
         self.recognition_system_loaded = False
         self.frame_count = 0
         
-        # Initialize model variables
-        self.blazeface_model = None
-        self.mobilefacenet_model = None
-        self.faiss_index = None
-        self.user_id_map = []
-        
         # Setup UI first (so we can update status)
         self.setup_ui()
-        
-        # Load face recognition models and data
-        self.load_recognition_system()
-        
-        self.setup_camera()
 
-    def load_recognition_system(self):
-        """Load face recognition models and FAISS data"""
-        print("Starting face recognition system initialization...")
-        self.title_label.setText("Loading recognition models...")
-        self.title_label.setStyleSheet("color: orange; font-size: 24pt; font-weight: bold;")
-        
-        try:
-            print("Loading TensorFlow Lite models...")
-            
-            # Load models as instance variables
-            self.blazeface_model = TFLiteModel(BLAZEFACE_MODEL_PATH)
-            print("BlazeFace model loaded successfully.")
-            
-            self.mobilefacenet_model = TFLiteModel(MOBILEFACENET_MODEL_PATH)
-            print("MobileFaceNet model loaded successfully.")
-            
-            print("Loading FAISS index and user data...")
-            self.faiss_index, self.user_id_map = load_faiss_data()
-            
-            if self.faiss_index and len(self.user_id_map) > 0:
-                print(f"Face recognition system loaded successfully. {len(self.user_id_map)} users enrolled.")
-                self.recognition_system_loaded = True
-                self.title_label.setText("System ready - No face detected")
-                self.title_label.setStyleSheet("color: blue; font-size: 24pt; font-weight: bold;")
-            else:
-                print("Warning: No enrolled users found in the system.")
-                self.recognition_system_loaded = False
-                self.title_label.setText("No users enrolled")
-                self.title_label.setStyleSheet("color: orange; font-size: 24pt; font-weight: bold;")
-                
-        except Exception as e:
-            print(f"Error loading recognition system: {e}")
-            self.blazeface_model = None
-            self.mobilefacenet_model = None
-            self.faiss_index = None
-            self.user_id_map = []
-            self.recognition_system_loaded = False
-            self.title_label.setText("System error - Check console")
-            self.title_label.setStyleSheet("color: red; font-size: 24pt; font-weight: bold;")
+        # Initialize face recognition system
+        self.recognizer = FaceRecognitionSystem()
+        self.recognition_system_loaded = True
+        self.title_label.setText("System ready - No face detected")
+        self.title_label.setStyleSheet("color: blue; font-size: 24pt; font-weight: bold;")
+
+        self.setup_camera()
 
     def play_beep_sound(self):
         """Play a beep sound when face is detected"""
@@ -168,71 +118,12 @@ class AttendanceUI(QMainWindow):
         self.cap = cv2.VideoCapture(0)
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
-        self.timer.start(30)  # Update every 30 ms
+        self.timer.start(40)  # Update every 30 ms
         print("Camera initialized and timer started.")
 
     def detect_and_recognize_faces(self, frame_rgb):
-        """Detect and recognize faces in the frame"""
-        try:
-            # Check if all components are properly loaded
-            if not self.recognition_system_loaded or self.faiss_index is None or self.blazeface_model is None or self.mobilefacenet_model is None:
-                print(f"System check failed: recognition_loaded={self.recognition_system_loaded}, faiss_index={self.faiss_index is not None}, blazeface={self.blazeface_model is not None}, mobilefacenet={self.mobilefacenet_model is not None}")
-                return "System not ready"
-
-            original_frame_shape = frame_rgb.shape
-
-            # 1. Face Detection
-            input_blazeface = preprocess_image_blazeface(frame_rgb)
-            detection_outputs = self.blazeface_model.run(input_blazeface)
-            regressors = detection_outputs[0]
-            classificators = detection_outputs[1]
-
-            faces_found = postprocess_blazeface_output(
-                regressors, classificators, original_frame_shape,
-                score_threshold=MIN_DETECTION_SCORE
-            )
-
-            if not faces_found:
-                # Log every 60 frames (about every 2 seconds) to avoid spam
-                if self.frame_count % 60 == 0:
-                    print("No face detected in current frame")
-                return "No face detected"
-
-            # Process the first detected face
-            face = faces_found[0]
-            x1, y1, x2, y2 = face['bbox']
-            detection_score = face['score']
-
-            print(f"Face detected! Bounding box: ({x1}, {y1}, {x2}, {y2}), Score: {detection_score:.3f}")
-
-            # Ensure ROI is valid before cropping
-            if x2 <= x1 or y2 <= y1:
-                print("Invalid bounding box detected, skipping recognition")
-                return "No face detected"
-
-            face_roi = frame_rgb[y1:y2, x1:x2]
-
-            if face_roi.size == 0 or face_roi.shape[0] == 0 or face_roi.shape[1] == 0:
-                print("Empty face ROI detected, skipping recognition")
-                return "No face detected"
-
-            # 2. Embedding Extraction
-            input_mobilefacenet = preprocess_image_mobilefacenet(face_roi)
-            embedding_output = self.mobilefacenet_model.run(input_mobilefacenet)
-            embedding = embedding_output[0].flatten().astype(np.float32)
-
-            # Normalize embedding
-            embedding = embedding / np.linalg.norm(embedding)
-
-            # 3. Face Recognition
-            recognized_name = recognize_face(embedding, self.faiss_index, self.user_id_map)
-            print(f"Recognition result: {recognized_name}")
-
-            return recognized_name
-
-        except Exception as e:
-            print(f"Error in face detection/recognition: {e}")
-            return "Detection error"
+        # Delegate detection and recognition to core FaceRecognitionSystem
+        return self.recognizer.detect_and_recognize(frame_rgb)
 
     def update_frame(self):
         # Capture and display the camera frame
@@ -243,7 +134,7 @@ class AttendanceUI(QMainWindow):
             
             # Only run face detection if system is ready
             if self.recognition_system_loaded:
-                # Perform face detection and recognition
+                # Delegate detection and recognition
                 detected_name = self.detect_and_recognize_faces(frame_rgb)
                 
                 # Update UI based on detection results
