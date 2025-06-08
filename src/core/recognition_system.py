@@ -145,7 +145,7 @@ def non_max_suppression(boxes, scores, threshold):
         order = order[inds + 1]
     return keep
 
-
+# --- Preprocessing Functions (Exportable) ---
 def preprocess_image_blazeface(frame):
     img = cv2.resize(frame, BLAZEFACE_INPUT_SIZE, interpolation=cv2.INTER_AREA)
     img = (img.astype(np.float32) / 127.5) - 1.0
@@ -157,7 +157,7 @@ def preprocess_image_mobilefacenet(face_roi):
     img = (img.astype(np.float32) / 127.5) - 1.0
     return img[np.newaxis, :, :, :]
 
-
+# --- Post-processing for BlazeFace (Exportable) ---
 def postprocess_blazeface_output(regressors, classificators, original_image_shape, score_threshold=MIN_DETECTION_SCORE, iou_threshold=0.3):
     global blaze_face_anchors
     if blaze_face_anchors is None:
@@ -165,14 +165,18 @@ def postprocess_blazeface_output(regressors, classificators, original_image_shap
 
     raw_regressors = regressors[0]
     raw_classificators = classificators[0]
+
     decoded_boxes, decoded_landmarks = _decode_boxes(raw_regressors, blaze_face_anchors.anchors)
     scores = tf.sigmoid(raw_classificators[:, 0]).numpy()
+
     mask = scores >= score_threshold
     boxes_f = decoded_boxes[mask]
     lands_f = decoded_landmarks[mask]
     scores_f = scores[mask]
+
     keep = non_max_suppression(boxes_f, scores_f, iou_threshold)
     final_boxes = boxes_f[keep]; final_landmarks = lands_f[keep]; final_scores = scores_f[keep]
+    
     h, w, _ = original_image_shape
     results = []
     for i, score in enumerate(final_scores):
@@ -194,30 +198,27 @@ def get_user_name_from_id(user_id):
     return res[0] if res else "Unknown"
 
 
-def load_faiss_data():
+# --- FAISS and DB Utilities for Recognition (READ-ONLY for FAISS) ---
+def load_faiss_for_recognition():
+    """Loads FAISS index and user map for recognition."""
     if os.path.exists(FAISS_INDEX_PATH) and os.path.exists(USER_ID_MAP_PATH):
         try:
             index = faiss.read_index(FAISS_INDEX_PATH)
-            arr = np.load(USER_ID_MAP_PATH)
-            user_map = arr.tolist() if arr.ndim>0 else []
-            return index, user_map
-        except Exception:
-            pass
-    # initialize new
-    index = faiss.IndexFlatIP(EMBEDDING_DIM)
-    return index, []
-
-
-def recognize_face(embedding, faiss_index, user_id_map):
-    if faiss_index.ntotal == 0:
-        return "No Enrolled Users"
-    D, I = faiss_index.search(embedding.reshape(1,-1), 1)
-    sim = D[0][0]
-    if sim >= RECOGNITION_THRESHOLD:
-        uid = user_id_map[I[0][0]]
-        return get_user_name_from_id(uid)
-    else:
-        return "Unknown"
+            user_id_map_array = np.load(USER_ID_MAP_PATH, allow_pickle=True)
+            user_id_map = user_id_map_array.tolist() if user_id_map_array.ndim > 0 else []
+            if index.ntotal == len(user_id_map) or (index.ntotal == 0 and not user_id_map): # Basic check
+                 print(f"FAISS index for recognition: {index.ntotal} vectors, map: {len(user_id_map)} entries.")
+                 return index, user_id_map
+            else:
+                print(f"Warning: FAISS index size ({index.ntotal}) and map size ({len(user_id_map)}) mismatch. Re-initializing.")
+        except Exception as e:
+            print(f"Error loading FAISS for recognition: {e}. Re-initializing.")
+    
+    print("FAISS index/map not found or corrupted for recognition. Initializing empty.")
+    # Return empty structures, recognition will report "No Enrolled Users"
+    index = faiss.IndexFlatIP(EMBEDDING_DIM) # Must match enrollment's index type
+    user_id_map = []
+    return index, user_id_map
 
 class FaceRecognitionSystem:
     """High-level API for face detection and recognition"""
@@ -225,30 +226,71 @@ class FaceRecognitionSystem:
         print("Initializing face recognition system...")
         self.blazeface_model = TFLiteModel(BLAZEFACE_MODEL_PATH)
         self.mobilefacenet_model = TFLiteModel(MOBILEFACENET_MODEL_PATH)
-        self.faiss_index, self.user_id_map = load_faiss_data()
+        self.faiss_index, self.user_id_map = load_faiss_for_recognition()
 
     def detect_and_recognize(self, frame_rgb):
-        try:
-            original_shape = frame_rgb.shape
-            # 1. Detect
-            inp = preprocess_image_blazeface(frame_rgb)
-            regs, clss = self.blazeface_model.run(inp)
-            faces = postprocess_blazeface_output(regs, clss, original_shape)
-            if not faces:
-                return "No face detected"
-            x1,y1,x2,y2 = faces[0]['bbox']
-            if x2<=x1 or y2<=y1:
-                return "No face detected"
-            roi = frame_rgb[y1:y2, x1:x2]
-            if roi.size==0:
-                return "No face detected"
-            # 2. Embed
-            inp2 = preprocess_image_mobilefacenet(roi)
-            emb_out = self.mobilefacenet_model.run(inp2)[0].flatten().astype(np.float32)
-            emb = emb_out / np.linalg.norm(emb_out)
-            # 3. Recognize
-            name = recognize_face(emb, self.faiss_index, self.user_id_map)
-            return name
-        except Exception as e:
-            print(f"Error in detection/recognition: {e}")
-            return "Detection error" 
+        original_shape = frame_rgb.shape
+
+        # 1. Face Detection
+        input_blaze = preprocess_image_blazeface(frame_rgb)
+        raw_regs, raw_clss = self.blazeface_model.run(input_blaze)
+        faces = postprocess_blazeface_output(raw_regs, raw_clss, original_shape, score_threshold=MIN_DETECTION_SCORE)
+
+        if not faces:
+            return "No face detected" # Or return a more structured response
+
+        # For simplicity, process the first (or highest score) detected face
+        # A more robust system might handle multiple faces with tracking or selection logic
+        best_face = sorted(faces, key=lambda x: x['score'], reverse=True)[0]
+        x1, y1, x2, y2 = best_face['bbox']
+
+        if x2 <= x1 or y2 <= y1:
+            return "Invalid face ROI" 
+        
+        face_roi_rgb = frame_rgb[y1:y2, x1:x2]
+        if face_roi_rgb.size == 0:
+            return "Empty face ROI"
+
+        # 2. Embedding Extraction
+        input_mfn = preprocess_image_mobilefacenet(face_roi_rgb)
+        embedding_output = self.mobilefacenet_model.run(input_mfn)[0].flatten().astype(np.float32)
+        embedding_normalized = embedding_output / np.linalg.norm(embedding_output)
+
+        # 3. Recognize against FAISS
+        if self.faiss_index.ntotal == 0:
+            return "No Enrolled Users"
+
+        # Search FAISS (k=1 for the single best match)
+        # FAISS returns distances (D) and indices (I)
+        # For IndexFlatIP (Inner Product), higher D means higher similarity (cosine similarity)
+        distances, indices = self.faiss_index.search(embedding_normalized.reshape(1, -1), 1)
+        
+        similarity_score = distances[0][0]
+        faiss_internal_idx = indices[0][0]
+
+        if similarity_score >= RECOGNITION_THRESHOLD:
+            if 0 <= faiss_internal_idx < len(self.user_id_map):
+                user_id = self.user_id_map[faiss_internal_idx]
+                user_name = get_user_name_from_id(user_id)
+                # print(f"Recognized: {user_name} (ID: {user_id}), Score: {similarity_score:.4f}")
+                return user_name
+            else:
+                print(f"Error: FAISS index {faiss_internal_idx} out of bounds for user_id_map (len {len(self.user_id_map)}).")
+                return "Map Index Error"
+        else:
+            # print(f"Unknown face, Max Score: {similarity_score:.4f}")
+            return "Unknown"
+    
+if __name__ == '__main__':
+    print("Running recognition_system.py self-test (conceptual)...")
+    # This would require a dummy image and enrolled data to fully test.
+    # For now, just test model loading and basic class instantiation.
+    try:
+        system = FaceRecognitionSystem()
+        print("FaceRecognitionSystem instantiated successfully.")
+        # Create a dummy RGB image (e.g., 640x480)
+        dummy_frame = np.random.randint(0, 256, (480, 640, 3), dtype=np.uint8)
+        result = system.detect_and_recognize(dummy_frame)
+        print(f"Recognition attempt on dummy frame: {result}")
+    except Exception as e:
+        print(f"Error during self-test: {e}")
