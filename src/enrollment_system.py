@@ -1,27 +1,24 @@
 import os
-import cv2 # For creating dummy images
-import sys
-import numpy as np # For creating dummy images
+import cv2  # For creating dummy images
+import numpy as np  # For creating dummy images
 import uuid
+from src.core.enrollment_processor import (
+    enroll_new_user,
+    init_enrollment_db_peewee,
+)
+from src.db.index import (
+    db as main_peewee_db,
+    Cadet,
+    Room,
+    SyncValidator,
+    CadetAttendance,
+)
 
-# --- Add src to Python path to allow direct import from src.core ---
-# This is one way to handle imports when running a script from the project root.
-# Alternatively, set PYTHONPATH environment variable.
-PROJECT_ROOT_SCRIPT = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR_SCRIPT = os.path.join(PROJECT_ROOT_SCRIPT, "src")
-if SRC_DIR_SCRIPT not in sys.path:
-    sys.path.append(SRC_DIR_SCRIPT)
-# --- End of sys.path modification ---
+# With a proper project setup (pyproject.toml and editable install),
+# we don't need to manipulate sys.path anymore.
+# Get project root, which is one level up from the 'src' directory where this script lives.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-try:
-    from core.enrollment_processor import enroll_new_user, init_enrollment_db_peewee
-    # To access FAISS_INDEX_PATH_EP etc. if needed for manual cleanup, not typically required by test script
-    from src.db.index import db as main_peewee_db, Cadet, Room, SyncValidator, CadetAttendance
-except ImportError as e:
-    print(f"Failed to import from src.core.enrollment_processor: {e}")
-    print("Ensure you are running this script from the project root, or PYTHONPATH is set correctly.")
-    print(f"Current sys.path: {sys.path}")
-    exit(1)
 
 if __name__ == "__main__":
     print("Running enrollment test script using src.core.enrollment_processor...")
@@ -30,18 +27,21 @@ if __name__ == "__main__":
     print("Initializing Peewee database schema (people.db)...")
     try:
         main_peewee_db.connect(reuse_if_open=True)
-        main_peewee_db.create_tables([Cadet, Room, SyncValidator, CadetAttendance], safe=True)
+        main_peewee_db.create_tables(
+            [Cadet, Room, SyncValidator, CadetAttendance], safe=True
+        )
         print("Schema ensured.")
     except Exception as e_db_init:
         print(f"Error during main DB init: {e_db_init}")
     finally:
-        if not main_peewee_db.is_closed(): main_peewee_db.close()
-    
+        if not main_peewee_db.is_closed():
+            main_peewee_db.close()
+
     # Call the specific enrollment DB init (might be redundant if above is comprehensive)
     init_enrollment_db_peewee()
 
     # 2. Prepare enrollment images directory
-    enrollment_images_dir = os.path.join(os.path.dirname(PROJECT_ROOT_SCRIPT), "enrollment_images")
+    enrollment_images_dir = os.path.join(PROJECT_ROOT, "enrollment_images")
     os.makedirs(enrollment_images_dir, exist_ok=True)
 
 
@@ -68,16 +68,19 @@ if __name__ == "__main__":
     # --- Optional: Cleanup for fresh run ---
     print("\n--- Optional: Clearing FAISS and Cadet table for fresh test ---")
     try:
-        if os.path.exists(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_index.bin")):
-            os.remove(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_index.bin"))
-        if os.path.exists(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_user_id_map.npy")):
-            os.remove(os.path.join(SRC_DIR_SCRIPT, "core", "faiss_user_id_map.npy"))
+        src_core_dir = os.path.join(PROJECT_ROOT, "src", "core")
+        if os.path.exists(os.path.join(src_core_dir, "faiss_index.bin")):
+            os.remove(os.path.join(src_core_dir, "faiss_index.bin"))
+        if os.path.exists(os.path.join(src_core_dir, "faiss_user_id_map.npy")):
+            os.remove(os.path.join(src_core_dir, "faiss_user_id_map.npy"))
         main_peewee_db.connect(reuse_if_open=True)
-        Cadet.delete().execute() # Clear all cadets
+        Cadet.delete().execute()  # Clear all cadets
         print("FAISS files removed (if existed) and Cadet table cleared.")
-    except Exception as e_clean: print(f"Error during cleanup: {e_clean}")
+    except Exception as e_clean:
+        print(f"Error during cleanup: {e_clean}")
     finally:
-        if not main_peewee_db.is_closed(): main_peewee_db.close()
+        if not main_peewee_db.is_closed():
+            main_peewee_db.close()
     # --- End of optional cleanup ---
 
 

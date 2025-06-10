@@ -4,27 +4,15 @@ import numpy as np
 import faiss
 import tensorflow as tf
 from ai_edge_litert.interpreter import Interpreter
-import sys
+from src.db.index import db as peewee_db_rs, Cadet
 
 
 # define global anchors variable for BlazeFace
 blaze_face_anchors = None
 
-# --- Add project root to sys.path for Peewee model imports ---
-PROJECT_ROOT_RS = os.path.dirname(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-)
-if PROJECT_ROOT_RS not in sys.path:
-    sys.path.append(PROJECT_ROOT_RS)
-try:
-    from src.db.index import db as peewee_db_rs, Cadet
-except ImportError as e:
-    print(
-        f"CRITICAL ERROR in recognition_system.py: Could not import Peewee models: {e}"
-    )
-    print(f"PROJECT_ROOT_RS was: {PROJECT_ROOT_RS}")
-    print(f"sys.path: {sys.path}")
-    raise  # Or handle error appropriately
+# With a proper project setup (pyproject.toml and editable install),
+# we don't need to manipulate sys.path anymore.
+
 
 # --- Paths and Configuration ---
 CORE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -203,19 +191,17 @@ def postprocess_blazeface_output(
     raw_regressors = regressors[0]
     raw_classificators = classificators[0]
 
-    decoded_boxes, decoded_landmarks = _decode_boxes(
+    decoded_boxes, _ = _decode_boxes(
         raw_regressors, blaze_face_anchors.anchors
     )
     scores = tf.sigmoid(raw_classificators[:, 0]).numpy()
 
     mask = scores >= score_threshold
     boxes_f = decoded_boxes[mask]
-    lands_f = decoded_landmarks[mask]
     scores_f = scores[mask]
 
     keep = non_max_suppression(boxes_f, scores_f, iou_threshold)
     final_boxes = boxes_f[keep]
-    final_landmarks = lands_f[keep]
     final_scores = scores_f[keep]
 
     h, w, _ = original_image_shape

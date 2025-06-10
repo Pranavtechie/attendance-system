@@ -1,6 +1,6 @@
-import tensorflow as tf
 from ai_edge_litert.interpreter import Interpreter
 import os
+import sys
 
 def inspect_tflite_model(model_path):
     """
@@ -51,6 +51,8 @@ if __name__ == "__main__":
     # The models are in the same directory as this script.
     # We use __file__ to get the current script's directory.
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    if SCRIPT_DIR not in sys.path:
+        sys.path.append(SCRIPT_DIR)
 
     # Construct the full paths to your models using the filenames you provided
     BLAZEFACE_MODEL_PATH = os.path.join(SCRIPT_DIR, "face_detection_front.tflite")

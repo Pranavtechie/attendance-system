@@ -1,7 +1,7 @@
 [project]
 name = "attendance-system"
 version = "0.1.0"
-description = "Add your description here"
+description = "A project to implement an attendance system using face recognition"
 readme = "README.md"
 requires-python = "==3.10.17"
 dependencies = [
@@ -16,3 +16,13 @@ dependencies = [
     "tensorflow",
     "gunicorn>=23.0.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.uv]
+package = true
+
+[project.scripts]
+attendance-app = "src.main:main"
+flask-app = "src.api.test:app"

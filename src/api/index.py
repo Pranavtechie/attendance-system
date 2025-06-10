@@ -2,13 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import uuid
 import requests as req
-
-try:
-    from core.enrollment_processor import enroll_new_user, init_enrollment_db
-except ImportError:
-    import sys
-    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..')) # Add project root
-    from src.core.enrollment_processor import enroll_new_user, init_enrollment_db
+from src.core.enrollment_processor import enroll_new_user, init_enrollment_db
 
 
 ENROLLMENT_IMAGES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'enrollment_images')
@@ -55,8 +49,8 @@ def api_enroll_user():
             # Using original extension, or force .jpg/.png if you standardize
             original_filename = file.filename
             extension = os.path.splitext(original_filename)[1].lower()
-            if not extension in ['.jpg', '.jpeg', '.png']: # Basic validation
-                 return jsonify({"status": "error", "message": "Invalid image file type. Use JPG or PNG."}), 400
+            if extension not in ['.jpg', '.jpeg', '.png']: # Basic validation
+                return jsonify({"status": "error", "message": "Invalid image file type. Use JPG or PNG."}), 400
 
             filename = f"{uuid.uuid4()}{extension}"
             image_path = os.path.join(ENROLLMENT_IMAGES_DIR, filename)
@@ -84,8 +78,10 @@ def api_enroll_user():
             print(f"An unexpected error occurred during enrollment: {e}")
             # If an image_path was determined, try to clean it up
             if 'image_path' in locals() and os.path.exists(image_path):
-                 try: os.remove(image_path)
-                 except: pass # Ignore cleanup error
+                try:
+                    os.remove(image_path)
+                except OSError as e_del:
+                    print(f"Error deleting image after failed enrollment: {e_del}")
             return jsonify({"status": "error", "message": f"An unexpected server error occurred: {str(e)}"}), 500
     
     return jsonify({"status": "error", "message": "Image processing failed."}), 400

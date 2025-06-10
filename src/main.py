@@ -1,6 +1,6 @@
 import sys
 from PySide6.QtWidgets import QApplication
-from ui.ui import AttendanceUI
+from src.ui.ui import AttendanceUI
 
 def main():
     app = QApplication(sys.argv)

@@ -6,22 +6,17 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import cv2
-import numpy as np
-import pygame
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea)
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea)
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap, QFont
+from PySide6.QtGui import QImage, QPixmap
 
 # Import recognition system functions
-from core.recognition_system import FaceRecognitionSystem, MIN_DETECTION_SCORE
+from core.recognition_system import FaceRecognitionSystem
 
 class AttendanceUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Attendance System")
-        
-        # Initialize pygame for sound
-        pygame.mixer.init()
         
         # Initialize detection state
         self.last_detection_state = False
@@ -39,23 +34,6 @@ class AttendanceUI(QMainWindow):
         self.title_label.setStyleSheet("color: blue; font-size: 24pt; font-weight: bold;")
 
         self.setup_camera()
-
-    def play_beep_sound(self):
-        """Play a beep sound when face is detected"""
-        try:
-            # Create a simple beep sound
-            frequency = 800  # Hz
-            duration = 0.2  # seconds
-            sample_rate = 22050
-            frames = int(duration * sample_rate)
-            arr = np.sin(2 * np.pi * frequency * np.linspace(0, duration, frames))
-            arr = (arr * 32767).astype(np.int16)
-            arr = np.repeat(arr.reshape(frames, 1), 2, axis=1)
-            
-            # Play the sound
-            pygame.mixer.Sound(arr).play()
-        except Exception as e:
-            print(f"Error playing beep sound: {e}")
 
     def setup_ui(self):
         # Set up the central widget and main layout
@@ -170,7 +148,6 @@ class AttendanceUI(QMainWindow):
                     if not self.last_detection_state:
                         # New detection - play beep sound and log
                         print(f"*** NEW FACE DETECTED: {detected_name} ***")
-                        self.play_beep_sound()
                         self.last_detection_state = True
                     
                     self.title_label.setText(f"Detected: {detected_name}")
@@ -200,7 +177,6 @@ class AttendanceUI(QMainWindow):
         # Clean up camera resources on window close
         print("Shutting down attendance system...")
         self.cap.release()
-        pygame.mixer.quit()
         event.accept()
 
 if __name__ == "__main__":
