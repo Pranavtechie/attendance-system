@@ -115,10 +115,22 @@ class AttendanceUI(QMainWindow):
 
     def setup_camera(self):
         # Initialize camera capture and timer for video updates
-        self.cap = cv2.VideoCapture(0)
+        if sys.platform.startswith('linux'):
+            # Use CAP_V4L2 backend for better compatibility on Linux
+            self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        else:
+            # Default backend for other systems (macOS, Windows)
+            self.cap = cv2.VideoCapture(0)
+
+        if not self.cap.isOpened():
+            print("Error: Could not open camera.")
+            self.title_label.setText("Error: Camera not found")
+            self.title_label.setStyleSheet("color: red; font-size: 24pt; font-weight: bold;")
+            return
+
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
-        self.timer.start(40)  # Update every 30 ms
+        self.timer.start(40)  # Update every 40 ms
         print("Camera initialized and timer started.")
 
     def detect_and_recognize_faces(self, frame_rgb):
@@ -166,6 +178,8 @@ class AttendanceUI(QMainWindow):
             image = QImage(frame_rgb.data, w, h, w * ch, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(image)
             self.camera_label.setPixmap(pixmap.scaled(self.camera_label.size(), Qt.KeepAspectRatio))
+        else:
+            print("Failed to grab frame from camera. Check camera connection.")
 
     def closeEvent(self, event):
         # Clean up camera resources on window close
