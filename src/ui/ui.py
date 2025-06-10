@@ -121,33 +121,24 @@ class AttendanceUI(QMainWindow):
     def setup_camera(self):
         # Initialize camera capture and timer for video updates
         self.cap = None
-        if sys.platform.startswith('linux'):
-            # On Linux, try different camera indices and backends for robustness
-            print("Running on Linux, trying to find camera...")
-            for i in range(5):  # Try indices 0 to 4
-                # First, try with V4L2 backend
-                print(f"Trying index {i} with V4L2 backend...")
-                cap_v4l2 = cv2.VideoCapture(i, cv2.CAP_V4L2)
-                if cap_v4l2.isOpened():
-                    self.cap = cap_v4l2
-                    print(f"Success: Camera found at index {i} with V4L2 backend.")
-                    break
+        print("Searching for a working camera...")
 
-                # If V4L2 fails, try default backend
-                print(f"Trying index {i} with default backend...")
-                cap_default = cv2.VideoCapture(i)
-                if cap_default.isOpened():
-                    self.cap = cap_default
-                    print(f"Success: Camera found at index {i} with default backend.")
+        for i in range(5):  # Try indices 0 to 4
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    print(f"Success: Found working camera at index {i}.")
+                    self.cap = cap
                     break
-            if not self.cap:
-                print("Could not find a working camera on Linux after trying multiple options.")
-        else:
-            # Default backend for other systems (macOS, Windows)
-            self.cap = cv2.VideoCapture(0)
+                else:
+                    print(f"Camera at index {i} opened but failed to capture a frame. Releasing.")
+                    cap.release()
+            else:
+                print(f"Could not open camera at index {i}.")
 
         if not self.cap or not self.cap.isOpened():
-            print("Error: Could not open camera.")
+            print("Error: Could not find or open a working camera.")
             self.title_label.setText("Error: Camera not found")
             self.title_label.setStyleSheet("color: red; font-size: 24pt; font-weight: bold;")
             return
