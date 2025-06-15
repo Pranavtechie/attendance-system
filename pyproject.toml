@@ -11,10 +11,10 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "peewee>=3.18.1",
     "pyside6>=6.9.0",
-    "pygame>=2.5.0",
     "requests>=2.32.3",
     "tensorflow",
     "gunicorn>=23.0.0",
+    "uuid7>=0.1.0",
 ]
 
 [tool.setuptools.packages.find]

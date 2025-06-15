@@ -1,5 +1,6 @@
 import sys
 import os
+from datetime import datetime, date, time
 
 # Add the 'src' directory to the Python path. This allows the script to be run
 # from the project root and still find modules in 'core', etc.
@@ -13,6 +14,8 @@ from PySide6.QtGui import QImage, QPixmap
 # Import recognition system functions
 from core.recognition_system import FaceRecognitionSystem
 
+
+
 class AttendanceUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -23,6 +26,15 @@ class AttendanceUI(QMainWindow):
         self.current_detected_name = "Loading system..."
         self.recognition_system_loaded = False
         self.frame_count = 0
+        self.attendance_cache = {}
+        self.distinct_detections = [0,0,0]
+        self.date = date.today()
+        self.SHIFT_1_START = time(9, 0)
+        self.SHIFT_2_START = time(12, 0)
+        self.SHIFT_3_START = time(15, 0)
+        self.SHIFT_4_START = time(18, 0)
+        self.SHIFT_END = time(23,59)
+
         
         # Setup UI first (so we can update status)
         self.setup_ui()
@@ -34,6 +46,28 @@ class AttendanceUI(QMainWindow):
         self.title_label.setStyleSheet("color: blue; font-size: 24pt; font-weight: bold;")
 
         self.setup_camera()
+
+    def get_current_session(self, check_time = None):
+        check_time = check_time or datetime.now().time()
+        def is_time_between(begin_time, end_time, check_time=None):
+            if begin_time < end_time:
+                # Standard range (e.g., 9am to 5pm)
+                return begin_time <= check_time < end_time
+            else: 
+                # Overnight range (e.g., 10pm to 2am)
+                return check_time >= begin_time or check_time < end_time
+        
+        if is_time_between(self.SHIFT_1_START,self.SHIFT_2_START,check_time):
+            return 1
+        elif is_time_between(self.SHIFT_2_START,self.SHIFT_3_START,check_time):
+            return 2
+        elif is_time_between(self.SHIFT_3_START,self.SHIFT_4_START,check_time):
+            return 3
+        elif is_time_between(self.SHIFT_4_START,self.SHIFT_END,check_time):
+            return 4
+        else:
+            return 0
+
 
     def setup_ui(self):
         # Set up the central widget and main layout
@@ -143,13 +177,26 @@ class AttendanceUI(QMainWindow):
                 detected_name = self.detect_and_recognize_faces(frame_rgb)
                 
                 # Update UI based on detection results
-                if detected_name not in ["No face detected", "Detection error", "System not ready"]:
-                    # Face detected and recognized
-                    if not self.last_detection_state:
-                        # New detection - play beep sound and log
-                        print(f"*** NEW FACE DETECTED: {detected_name} ***")
-                        self.last_detection_state = True
+                if detected_name not in ["No face detected", "Detection error", "System not ready", "Unknown"]:
+                    # Face detected and recogni
+                    if self.date != date.today():
+                        self.date = date.today()
+                        self.attendance_cache = {}
+
+                    session = self.get_current_session(datetime.now().time())
+                    if detected_name not in self.distinct_detections or detected_name not in self.attendance_cache or self.attendance_cache[detected_name] != session:
+                        self.attendance_cache[detected_name] = session
+                        if not self.last_detection_state:
+                            # New detection - play beep sound and log
+                            print(f"*** NEW FACE DETECTED: {detected_name} ***")
+                            self.last_detection_state = True
+                        self.distinct_detections.append(detected_name)
+                        del(self.distinct_detections[0])
+                        
+                    else:
+                        print("Duplicate Face ", detected_name)
                     
+                    print(self.distinct_detections)
                     self.title_label.setText(f"Detected: {detected_name}")
                     self.title_label.setStyleSheet("color: green; font-size: 24pt; font-weight: bold;")
                 elif detected_name == "No face detected":
@@ -164,7 +211,7 @@ class AttendanceUI(QMainWindow):
                     self.last_detection_state = False
                     self.title_label.setText(detected_name)
                     self.title_label.setStyleSheet("color: orange; font-size: 24pt; font-weight: bold;")
-            
+
             # Display the camera frame
             h, w, ch = frame_rgb.shape
             image = QImage(frame_rgb.data, w, h, w * ch, QImage.Format_RGB888)
