@@ -15,6 +15,8 @@ dependencies = [
     "tensorflow",
     "gunicorn>=23.0.0",
     "uuid7>=0.1.0",
+    "flask-cors>=6.0.1",
+    "pytz>=2025.2",
 ]
 
 [tool.setuptools.packages.find]
@@ -25,4 +27,3 @@ package = true
 
 [project.scripts]
 attendance-app = "src.main:main"
-flask-app = "src.api.test:app"

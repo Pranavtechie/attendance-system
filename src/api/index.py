@@ -1,29 +1,143 @@
-from flask import Flask, request, jsonify
 import os
-from uuid_extensions import uuid7str
+from datetime import datetime
+from urllib.parse import urlparse
+
+import pytz
 import requests as req
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from uuid_extensions import uuid7str
+
+from src.db.index import Cadet, CadetAttendance, Room, Session, db
 
 
-ENROLLMENT_IMAGES_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'enrollment_images')
-os.makedirs(ENROLLMENT_IMAGES_DIR, exist_ok=True)
+def ist_timestamp():
+    dt = datetime.now(pytz.timezone("Asia/Kolkata"))
+    milliseconds = dt.microsecond // 1000  # Convert microseconds to milliseconds
+    dt = dt.replace(
+        microsecond=milliseconds * 1000
+    )  # Set precision to 3 decimal places
+    return dt.isoformat()
+
+
+def string_to_timestamp(s):
+    if " " in s:
+        s = s.replace(" ", "T", 1)  # Replace first space with 'T'
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"  # Replace 'Z' with '+00:00'
+    dt = datetime.fromisoformat(s)  # Parse ISO string
+    return dt.astimezone(pytz.timezone("Asia/Kolkata")).isoformat()
 
 
 app = Flask(__name__)
+CORS(
+    app,
+    resources={
+        r"/*": {
+            "origins": [
+                "http://localhost:8787",
+                "https://api.korukondacoachingcentre.com",
+                "http://localhost:3000",
+            ],
+            "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+            "allow_headers": ["Content-Type"],
+        }
+    },
+)
+
+
+@app.before_request
+def _open_db():
+    if db.is_closed():
+        db.connect(reuse_if_open=True)
+
+
+@app.teardown_request
+def _close_db(exc):
+    if not db.is_closed():
+        db.close()
+
 
 @app.route("/")
 def hello_world():
     return {"message": "Hello, World!"}
 
+
 @app.route("/test", methods=["GET"])
 def test():
     return {"uuid": uuid7str()}
+
+
+@app.route("/enroll", methods=["POST"])
+def enroll():
+    data = request.json
+    print(data)
+    syncedAt = ist_timestamp()
+
+    picture_url = data.get("pictureUrl")
+
+    # --- Validate and download the image --- #
+    if not picture_url:
+        return {"message": "pictureUrl missing from payload"}, 400
+
+    # Ensure the URL has a .jpg filename
+    parsed_url = urlparse(picture_url)
+    filename = os.path.basename(parsed_url.path)
+
+    if not filename.lower().endswith(".jpg"):
+        return {"message": "Only .jpg images are supported."}, 400
+
+    local_path = os.path.join(ENROLLMENT_IMAGES_DIR, filename)
+
+    try:
+        response = req.get(picture_url, timeout=15)
+        if response.status_code != 200:
+            return {
+                "message": "Failed to download image",
+                "status": response.status_code,
+            }, 502
+
+        # Basic content‐type validation (allows e.g. image/jpeg)
+        content_type = response.headers.get("Content-Type", "")
+        if "image/jpeg" not in content_type.lower():
+            return {"message": "URL does not point to a JPEG image"}, 400
+
+        # Write the image to disk
+        with open(local_path, "wb") as f:
+            f.write(response.content)
+
+    except Exception as e:
+        return {"message": "Error downloading image", "error": str(e)}, 500
+
+    try:
+        Cadet.insert(
+            uniqueId=data["uniqueId"],
+            name=data["preferredName"],
+            admissionNumber=data["admissionNumber"],
+            roomId=data["roomId"],
+            pictureFileName=filename,
+            syncedAt=syncedAt,
+        ).on_conflict_replace().execute()
+
+    except Exception as e:
+        # Cleanup the saved image if DB write fails
+        if os.path.exists(local_path):
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
+
+        return {"message": "Enrollment failed", "error": str(e)}, 500
+
+    return {"syncedAt": syncedAt}, 200
+
 
 # @app.route('/api/enroll', methods=['POST'])
 # def api_enroll_user():
 #     # Check if the post request has the file part
 #     if 'image' not in request.files:
 #         return jsonify({"status": "error", "message": "No image file part in the request."}), 400
-    
+
 #     file = request.files['image']
 
 #     # If the user does not select a file, the browser submits an empty file without a filename.
@@ -36,7 +150,7 @@ def test():
 #     room = request.form.get('room')
 
 #     if not all([name, admission_number, room]):
-#         return jsonify({"status": "error", 
+#         return jsonify({"status": "error",
 #                         "message": "Missing data: name, admissionNumber, or room is required."}), 400
 
 #     if file: # and allowed_file(file.filename) # You can add file type validation if needed
@@ -50,7 +164,7 @@ def test():
 
 #             filename = f"{uuid.uuid4()}{extension}"
 #             image_path = os.path.join(ENROLLMENT_IMAGES_DIR, filename)
-            
+
 #             file.save(image_path)
 #             print(f"Image saved to: {image_path}")
 
@@ -79,7 +193,7 @@ def test():
 #                 except OSError as e_del:
 #                     print(f"Error deleting image after failed enrollment: {e_del}")
 #             return jsonify({"status": "error", "message": f"An unexpected server error occurred: {str(e)}"}), 500
-    
+
 #     return jsonify({"status": "error", "message": "Image processing failed."}), 400
 
 # Initialize DB schema once when the app starts
@@ -87,5 +201,5 @@ def test():
 # with app.app_context():
 #     init_enrollment_db() # From core.enrollment_processor
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=1337)
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=1337)

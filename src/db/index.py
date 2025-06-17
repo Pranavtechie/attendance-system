@@ -1,42 +1,45 @@
-from peewee import Model, CharField, SqliteDatabase, IntegerField, DateTimeField
+from peewee import CharField, DateTimeField, Model, SqliteDatabase
 
-db = SqliteDatabase('people.db')
-
+db = SqliteDatabase('kcc.db')
 
 class Cadet(Model):
     uniqueId = CharField(primary_key=True)
     name = CharField()
     admissionNumber = CharField()
-    roomName  = CharField()
+    roomId = CharField()
+    pictureFileName = CharField()
+    syncedAt = DateTimeField()
 
     class Meta:
         database = db
 
 class Room(Model):
-    roomName = CharField(primary_key=True)
-    roomCapacity = IntegerField()
+    roomId = CharField(primary_key=True)
+    roomName = CharField()
+    syncedAt = DateTimeField()
 
     class Meta:
         database = db
     
 
-class SyncValidator(Model):
-    syncHash = CharField()
-    syncTimestamp = DateTimeField()
+class CadetAttendance(Model):
+    uniqueId = CharField()
+    attendanceTimeStamp = DateTimeField()
+    sessionId = CharField()
+    syncedAt = DateTimeField()
+
+    class Meta:
+        database = db  
+
+class Session(Model):
+    sessionId = CharField(primary_key=True)
+    sessionTimestamp = DateTimeField()
+    syncedAt = DateTimeField()
 
     class Meta:
         database = db
 
-class CadetAttendance(Model):
-    uniqueId = CharField()
-    attendanceTimeStamp = DateTimeField()
-    session = CharField()
-
-    class Meta:
-        database = db   
-
 if __name__ == "__main__":
-    print('something happened')
     db.connect()
-    db.create_tables([Cadet, Room, SyncValidator, CadetAttendance], safe=True)
+    db.create_tables([Cadet, Room, CadetAttendance, Session], safe=True)
     db.close()

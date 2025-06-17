@@ -1,10 +1,24 @@
 import os
-import cv2
-import numpy as np
-import faiss
 import sqlite3
+
+import cv2
+import faiss
+import numpy as np
 import tensorflow as tf
 from ai_edge_litert.interpreter import Interpreter
+
+from src.config import (
+    BLAZEFACE_INPUT_SIZE,
+    BLAZEFACE_MODEL_PATH,
+    DB_PATH,
+    EMBEDDING_DIM,
+    FAISS_INDEX_PATH,
+    MIN_DETECTION_SCORE,
+    MOBILEFACENET_INPUT_SIZE,
+    MOBILEFACENET_MODEL_PATH,
+    RECOGNITION_THRESHOLD,
+    USER_ID_MAP_PATH,
+)
 
 # define global anchors variable for BlazeFace
 blaze_face_anchors = None
@@ -13,19 +27,20 @@ blaze_face_anchors = None
 CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(CORE_DIR))
 
-BLAZEFACE_MODEL_PATH = os.path.join(CORE_DIR, "face_detection_front.tflite")
-MOBILEFACENET_MODEL_PATH = os.path.join(CORE_DIR, "mobilefacenet.tflite")
-DB_PATH = os.path.join(PROJECT_ROOT, "attendance_system.db")
-FAISS_INDEX_PATH = os.path.join(CORE_DIR, "faiss_index.bin")
-USER_ID_MAP_PATH = os.path.join(CORE_DIR, "faiss_user_id_map.npy")
+# BLAZEFACE_MODEL_PATH = os.path.join(CORE_DIR, "face_detection_front.tflite")
+# MOBILEFACENET_MODEL_PATH = os.path.join(CORE_DIR, "mobilefacenet.tflite")
+# DB_PATH = os.path.join(PROJECT_ROOT, "attendance_system.db")
+# FAISS_INDEX_PATH = os.path.join(CORE_DIR, "faiss_index.bin")
+# USER_ID_MAP_PATH = os.path.join(CORE_DIR, "faiss_user_id_map.npy")
 
-EMBEDDING_DIM = 192  # Based on MobileFaceNet output
-BLAZEFACE_INPUT_SIZE = (128, 128)  # W, H
-MOBILEFACENET_INPUT_SIZE = (112, 112)  # W, H
+# EMBEDDING_DIM = 192  # Based on MobileFaceNet output
+# BLAZEFACE_INPUT_SIZE = (128, 128)  # W, H
+# MOBILEFACENET_INPUT_SIZE = (112, 112)  # W, H
 
 # --- Recognition Thresholds ---
-RECOGNITION_THRESHOLD = 0.75  # Cosine similarity threshold for recognition
-MIN_DETECTION_SCORE = 0.7     # Minimum score for BlazeFace detection
+# RECOGNITION_THRESHOLD = 0.75  # Cosine similarity threshold for recognition
+# MIN_DETECTION_SCORE = 0.7     # Minimum score for BlazeFace detection
+
 
 # --- TensorFlow Lite Interpreter Wrapper ---
 class TFLiteModel:
@@ -37,17 +52,20 @@ class TFLiteModel:
         print(f"TFLite model '{os.path.basename(model_path)}' loaded and initialized.")
 
     def run(self, input_data):
-        input_data = input_data.astype(self.input_details[0]['dtype'])
-        self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+        input_data = input_data.astype(self.input_details[0]["dtype"])
+        self.interpreter.set_tensor(self.input_details[0]["index"], input_data)
         self.interpreter.invoke()
         outputs = []
         for output_detail in self.output_details:
-            outputs.append(self.interpreter.get_tensor(output_detail['index']))
+            outputs.append(self.interpreter.get_tensor(output_detail["index"]))
         return outputs
+
 
 # AnchorBoxes and post-processing for BlazeFace
 class AnchorBoxes:
-    def __init__(self, input_size=BLAZEFACE_INPUT_SIZE, min_scale=0.1484375, max_scale=0.75):
+    def __init__(
+        self, input_size=BLAZEFACE_INPUT_SIZE, min_scale=0.1484375, max_scale=0.75
+    ):
         self.input_size = input_size
         self.min_scale = min_scale
         self.max_scale = max_scale
@@ -59,8 +77,10 @@ class AnchorBoxes:
     def _generate_anchors(self):
         anchors = []
         num_layers = len(self.feature_map_sizes)
-        scales = [self.min_scale + (self.max_scale - self.min_scale) * i / (num_layers - 1)
-                  for i in range(num_layers)]
+        scales = [
+            self.min_scale + (self.max_scale - self.min_scale) * i / (num_layers - 1)
+            for i in range(num_layers)
+        ]
         scales[num_layers - 1] = (scales[num_layers - 1] + 1.0) / 2.0
 
         for layer_idx, (fm_h, fm_w) in enumerate(self.feature_map_sizes):
@@ -72,7 +92,9 @@ class AnchorBoxes:
                     if layer_idx < 3:
                         scale_base = scales[layer_idx]
                         anchors.append([center_x, center_y, scale_base, scale_base])
-                        anchors.append([center_x, center_y, scale_base * 1.2, scale_base * 1.2])
+                        anchors.append(
+                            [center_x, center_y, scale_base * 1.2, scale_base * 1.2]
+                        )
                     else:
                         for k in range(self.num_anchors_per_location[layer_idx]):
                             w = scales[layer_idx] * (1.0 + k * 0.0001)
@@ -81,7 +103,9 @@ class AnchorBoxes:
 
         final_anchors = np.array(anchors, dtype=np.float32)
         if final_anchors.shape[0] != 896:
-            raise ValueError(f"Anchor generation failed: Expected 896 anchors, but got {final_anchors.shape[0]}.")
+            raise ValueError(
+                f"Anchor generation failed: Expected 896 anchors, but got {final_anchors.shape[0]}."
+            )
         return final_anchors
 
 
@@ -110,8 +134,10 @@ def _decode_boxes(raw_boxes, anchors):
     num_landmarks = 6
     landmarks = np.zeros((raw_boxes.shape[0], num_landmarks * 2), dtype=np.float32)
     for i in range(num_landmarks):
-        landmarks[:, i*2] = raw_boxes[:, 4 + i*2] * anchors[:, 2] + anchors[:, 0]
-        landmarks[:, i*2 + 1] = raw_boxes[:, 4 + i*2 + 1] * anchors[:, 3] + anchors[:, 1]
+        landmarks[:, i * 2] = raw_boxes[:, 4 + i * 2] * anchors[:, 2] + anchors[:, 0]
+        landmarks[:, i * 2 + 1] = (
+            raw_boxes[:, 4 + i * 2 + 1] * anchors[:, 3] + anchors[:, 1]
+        )
     landmarks = np.clip(landmarks, 0.0, 1.0)
 
     return boxes_yx, landmarks
@@ -160,14 +186,22 @@ def preprocess_image_mobilefacenet(face_roi):
     return img[np.newaxis, :, :, :]
 
 
-def postprocess_blazeface_output(regressors, classificators, original_image_shape, score_threshold=MIN_DETECTION_SCORE, iou_threshold=0.3):
+def postprocess_blazeface_output(
+    regressors,
+    classificators,
+    original_image_shape,
+    score_threshold=MIN_DETECTION_SCORE,
+    iou_threshold=0.3,
+):
     global blaze_face_anchors
     if blaze_face_anchors is None:
         blaze_face_anchors = AnchorBoxes()
 
     raw_regressors = regressors[0]
     raw_classificators = classificators[0]
-    decoded_boxes, decoded_landmarks = _decode_boxes(raw_regressors, blaze_face_anchors.anchors)
+    decoded_boxes, decoded_landmarks = _decode_boxes(
+        raw_regressors, blaze_face_anchors.anchors
+    )
     scores = tf.sigmoid(raw_classificators[:, 0]).numpy()
     mask = scores >= score_threshold
     boxes_f = decoded_boxes[mask]
@@ -186,8 +220,8 @@ def postprocess_blazeface_output(regressors, classificators, original_image_shap
         x_max = int(b[3] * w)
         y_max = int(b[2] * h)
         x_min, y_min = max(0, x_min), max(0, y_min)
-        x_max, y_max = min(w-1, x_max), min(h-1, y_max)
-        results.append({'bbox':(x_min,y_min,x_max,y_max),'score':score})
+        x_max, y_max = min(w - 1, x_max), min(h - 1, y_max)
+        results.append({"bbox": (x_min, y_min, x_max, y_max), "score": score})
     return results
 
 
@@ -203,9 +237,9 @@ def get_user_name_from_id(user_id):
 def load_faiss_data():
     if os.path.exists(FAISS_INDEX_PATH) and os.path.exists(USER_ID_MAP_PATH):
         try:
-            index = faiss.read_index(FAISS_INDEX_PATH)
+            index = faiss.read_index(str(FAISS_INDEX_PATH))
             arr = np.load(USER_ID_MAP_PATH)
-            user_map = arr.tolist() if arr.ndim>0 else []
+            user_map = arr.tolist() if arr.ndim > 0 else []
             return index, user_map
         except Exception:
             pass
@@ -217,7 +251,7 @@ def load_faiss_data():
 def recognize_face(embedding, faiss_index, user_id_map):
     if faiss_index.ntotal == 0:
         return "No Enrolled Users"
-    D, I = faiss_index.search(embedding.reshape(1,-1), 1)
+    D, I = faiss_index.search(embedding.reshape(1, -1), 1)
     sim = D[0][0]
     if sim >= RECOGNITION_THRESHOLD:
         uid = user_id_map[I[0][0]]
@@ -225,8 +259,10 @@ def recognize_face(embedding, faiss_index, user_id_map):
     else:
         return "Unknown"
 
+
 class FaceRecognitionSystem:
     """High-level API for face detection and recognition"""
+
     def __init__(self):
         print("Initializing face recognition system...")
         self.blazeface_model = TFLiteModel(BLAZEFACE_MODEL_PATH)
@@ -242,11 +278,11 @@ class FaceRecognitionSystem:
             faces = postprocess_blazeface_output(regs, clss, original_shape)
             if not faces:
                 return "No face detected"
-            x1,y1,x2,y2 = faces[0]['bbox']
-            if x2<=x1 or y2<=y1:
+            x1, y1, x2, y2 = faces[0]["bbox"]
+            if x2 <= x1 or y2 <= y1:
                 return "No face detected"
             roi = frame_rgb[y1:y2, x1:x2]
-            if roi.size==0:
+            if roi.size == 0:
                 return "No face detected"
             # 2. Embed
             inp2 = preprocess_image_mobilefacenet(roi)
