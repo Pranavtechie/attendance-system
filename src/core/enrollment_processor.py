@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import time
 
 import cv2
@@ -11,13 +10,13 @@ from ai_edge_litert.interpreter import Interpreter
 from src.config import (
     BLAZEFACE_INPUT_SIZE,
     BLAZEFACE_MODEL_PATH,
-    DB_PATH,
     EMBEDDING_DIM,
     FAISS_INDEX_PATH,
     MOBILEFACENET_INPUT_SIZE,
     MOBILEFACENET_MODEL_PATH,
     USER_ID_MAP_PATH,
 )
+from src.db.index import Cadet, db
 
 # --- Configuration based on your model inspection ---
 # BLAZEFACE_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_detection_front.tflite")
@@ -127,7 +126,7 @@ class AnchorBoxes:
 
                     # The specific aspect ratios for the 56 anchors on the 2x2 layer are
                     # not directly exposed in generic MediaPipe anchor generators.
-                    # For `face_detection_front.tflite`, the anchor generation logic is simplified here
+                    # For `face_detection_front.tflite`, the anchor generation  ic is simplified here
                     # to match the *count* (896 total) and basic properties (square-ish).
                     # A more precise implementation would need to match MediaPipe's C++ code exactly,
                     # which defines specific "aspect_ratio" and "fixed_anchor_size" lists per layer.
@@ -374,175 +373,135 @@ def postprocess_blazeface_output(
 
 
 # --- Database & FAISS Setup ---
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-
 def load_faiss_data():
-    """Loads existing FAISS index and user ID map, or initializes new ones."""
+    """Loads existing FAISS index and unique ID map, or initializes new ones."""
     if os.path.exists(FAISS_INDEX_PATH) and os.path.exists(USER_ID_MAP_PATH):
-        print("Loading existing FAISS index and user ID map...")
+        print("Loading existing FAISS index and unique ID map...")
         index = faiss.read_index(str(FAISS_INDEX_PATH))
-        user_id_map_array = np.load(USER_ID_MAP_PATH)
-        user_id_map = user_id_map_array.tolist() if user_id_map_array.ndim > 0 else []
+        unique_id_map_array = np.load(USER_ID_MAP_PATH, allow_pickle=True)
+        unique_id_map = (
+            unique_id_map_array.tolist() if unique_id_map_array.ndim > 0 else []
+        )
         print(f"FAISS index loaded with {index.ntotal} vectors.")
-        print(f"User ID map loaded with {len(user_id_map)} entries.")
-        return index, user_id_map
+        print(f"Unique ID map loaded with {len(unique_id_map)} entries.")
+        return index, unique_id_map
     else:
-        print("Creating new FAISS index (FlatIP) and user ID map...")
+        print("Creating new FAISS index (FlatIP) and unique ID map...")
         index = faiss.IndexFlatIP(EMBEDDING_DIM)  # Inner Product for cosine similarity
-        user_id_map = []
-        print("New FAISS index and user ID map created.")
-        return index, user_id_map
+        unique_id_map = []
+        print("New FAISS index and unique ID map created.")
+        return index, unique_id_map
 
 
-def save_faiss_data(index, user_id_map):
-    """Saves the FAISS index and user ID map to disk."""
+def save_faiss_data(index, unique_id_map):
+    """Saves the FAISS index and unique ID map to disk."""
     faiss.write_index(index, str(FAISS_INDEX_PATH))
     np.save(
-        USER_ID_MAP_PATH, np.array(user_id_map, dtype=int)
-    )  # Ensure integer type for map
-    print("FAISS index and user ID map saved.")
+        USER_ID_MAP_PATH, np.array(unique_id_map, dtype=object)
+    )  # Use object type for string unique IDs
+    print("FAISS index and unique ID map saved.")
 
 
-# --- Enrollment Function ---
-def enroll_user(user_name, image_path):
+def enroll_user(unique_id, image_path):
+    """
+    Enroll a user using their unique_id and image path.
+    The cadet must already exist in the database.
+    """
     load_tflite_models()  # Ensure models are loaded
 
-    print(f"Enrolling user: {user_name} from {image_path}")
-    image = cv2.imread(image_path)
-    if image is None:
-        print(f"Error: Could not read image from {image_path}")
-        return False
+    # Connect to database
+    if db.is_closed():
+        db.connect(reuse_if_open=True)
 
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
-
-    # 1. Face Detection (BlazeFace - TFLite)
-    start_time = time.perf_counter()
-    input_blazeface = preprocess_image_blazeface(image_rgb)
-    detection_outputs = blazeface_tflite.run(input_blazeface)
-    regressors = detection_outputs[0]
-    classificators = detection_outputs[1]
-    blazeface_time = (time.perf_counter() - start_time) * 1000
-    print(f"BlazeFace inference time: {blazeface_time:.2f} ms")
-
-    # Post-process BlazeFace output to get bounding boxes
-    faces_found = postprocess_blazeface_output(regressors, classificators, image.shape)
-
-    if not faces_found:
-        print(
-            "No face detected for enrollment. Please ensure the image has a clear face."
-        )
-        return False
-
-    # For enrollment, we typically take the first (or most confident) face
-    best_face = faces_found[0]
-    x1, y1, x2, y2 = best_face["bbox"]
-
-    # Ensure ROI is valid and not empty
-    if x2 <= x1 or y2 <= y1:
-        print(
-            f"Warning: Invalid bounding box coordinates ({x1},{y1},{x2},{y2}). Skipping enrollment."
-        )
-        return False
-
-    face_roi = image_rgb[y1:y2, x1:x2]
-    if face_roi.size == 0 or face_roi.shape[0] == 0 or face_roi.shape[1] == 0:
-        print(
-            "Error: Face ROI is empty after cropping. Check bounding box coordinates."
-        )
-        return False
-
-    # 2. Embedding Extraction (MobileFaceNet - TFLite)
-    start_time = time.perf_counter()
-    input_mobilefacenet = preprocess_image_mobilefacenet(face_roi)
-    embedding_output = mobilefacenet_tflite.run(input_mobilefacenet)
-    embedding = embedding_output[0].flatten().astype(np.float32)
-    mobilefacenet_time = (time.perf_counter() - start_time) * 1000
-    print(f"MobileFaceNet inference time: {mobilefacenet_time:.2f} ms")
-
-    # Normalize embedding to unit vector (L2 normalization)
-    embedding = embedding / np.linalg.norm(embedding)
-
-    # 3. Store in SQLite and FAISS
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    user_id = None
     try:
-        cursor.execute("INSERT INTO users (name) VALUES (?)", (user_name,))
-        user_id = cursor.lastrowid
-        conn.commit()
-        print(f"User '{user_name}' added with user_id: {user_id}")
-    except sqlite3.IntegrityError:
-        print(f"User '{user_name}' already exists. Retrieving existing user_id.")
-        cursor.execute("SELECT user_id FROM users WHERE name = ?", (user_name,))
-        user_id = cursor.fetchone()[0]
-        conn.rollback()  # Rollback the failed insert if it was a duplicate name attempt
+        # Check if cadet exists in database
+        cadet = Cadet.get_or_none(Cadet.uniqueId == unique_id)
+        if not cadet:
+            print(f"Error: No cadet found with unique_id: {unique_id}")
+            return False
+
+        print(f"Enrolling cadet: {cadet.name} (ID: {unique_id}) from {image_path}")
+
+        image = cv2.imread(image_path)
+        if image is None:
+            print(f"Error: Could not read image from {image_path}")
+            return False
+
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB
+
+        # 1. Face Detection (BlazeFace - TFLite)
+        start_time = time.perf_counter()
+        input_blazeface = preprocess_image_blazeface(image_rgb)
+        detection_outputs = blazeface_tflite.run(input_blazeface)
+        regressors = detection_outputs[0]
+        classificators = detection_outputs[1]
+        blazeface_time = (time.perf_counter() - start_time) * 1000
+        print(f"BlazeFace inference time: {blazeface_time:.2f} ms")
+
+        # Post-process BlazeFace output to get bounding boxes
+        faces_found = postprocess_blazeface_output(
+            regressors, classificators, image.shape
+        )
+
+        if not faces_found:
+            print(
+                "No face detected for enrollment. Please ensure the image has a clear face."
+            )
+            return False
+
+        # For enrollment, we typically take the first (or most confident) face
+        best_face = faces_found[0]
+        x1, y1, x2, y2 = best_face["bbox"]
+
+        # Ensure ROI is valid and not empty
+        if x2 <= x1 or y2 <= y1:
+            print(
+                f"Warning: Invalid bounding box coordinates ({x1},{y1},{x2},{y2}). Skipping enrollment."
+            )
+            return False
+
+        face_roi = image_rgb[y1:y2, x1:x2]
+        if face_roi.size == 0 or face_roi.shape[0] == 0 or face_roi.shape[1] == 0:
+            print(
+                "Error: Face ROI is empty after cropping. Check bounding box coordinates."
+            )
+            return False
+
+        # 2. Embedding Extraction (MobileFaceNet - TFLite)
+        start_time = time.perf_counter()
+        input_mobilefacenet = preprocess_image_mobilefacenet(face_roi)
+        embedding_output = mobilefacenet_tflite.run(input_mobilefacenet)
+        embedding = embedding_output[0].flatten().astype(np.float32)
+        mobilefacenet_time = (time.perf_counter() - start_time) * 1000
+        print(f"MobileFaceNet inference time: {mobilefacenet_time:.2f} ms")
+
+        # Normalize embedding to unit vector (L2 normalization)
+        embedding = embedding / np.linalg.norm(embedding)
+
+        # 3. Store in FAISS with unique_id
+        # Load FAISS index and unique ID map (or initialize if first enrollment)
+        faiss_index, unique_id_map = load_faiss_data()
+
+        # Check if this unique_id is already enrolled
+        if unique_id in unique_id_map:
+            print(f"Warning: Cadet {unique_id} is already enrolled. Skipping.")
+            return False
+
+        faiss_index.add(embedding.reshape(1, -1))  # Add the embedding to FAISS
+        unique_id_map.append(
+            unique_id
+        )  # Add the unique_id to the map, corresponding to the new FAISS index ID
+
+        save_faiss_data(
+            faiss_index, unique_id_map
+        )  # Save the index and map after adding
+
+        print(f"Enrollment successful for {cadet.name} (unique_id: {unique_id}).")
+        return True
+
+    except Exception as e:
+        print(f"Error during enrollment: {e}")
+        return False
     finally:
-        conn.close()
-
-    # Load FAISS index and user ID map (or initialize if first enrollment)
-    faiss_index, user_id_map = load_faiss_data()
-
-    faiss_index.add(embedding.reshape(1, -1))  # Add the embedding to FAISS
-    user_id_map.append(
-        user_id
-    )  # Add the user_id to the map, corresponding to the new FAISS index ID
-
-    save_faiss_data(faiss_index, user_id_map)  # Save the index and map after adding
-
-    print(f"Enrollment successful for {user_name} (ID: {user_id}).")
-    return True
-
-
-# --- Example Usage (for testing enrollment) ---
-if __name__ == "__main__":
-    # Ensure the database is initialized
-    init_db()
-
-    # Create a directory for enrollment images if it doesn't exist
-    enrollment_image_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "../../enrollment_images"
-    )
-    os.makedirs(enrollment_image_dir, exist_ok=True)
-
-    # --- IMPORTANT: Replace these with paths to REAL images of faces ---
-    person1_image_path = os.path.join(enrollment_image_dir, "person1_alice.jpg")
-    person2_image_path = os.path.join(enrollment_image_dir, "person2_bob.jpg")
-    person3_image_path = os.path.join(enrollment_image_dir, "person3_pranav.jpg")
-
-    print("\n--- Starting Enrollment Test (with proper BlazeFace decoder) ---")
-
-    # Clear existing FAISS data for a clean test run if needed
-    if os.path.exists(FAISS_INDEX_PATH):
-        os.remove(FAISS_INDEX_PATH)
-    if os.path.exists(USER_ID_MAP_PATH):
-        os.remove(USER_ID_MAP_PATH)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM users")
-    conn.commit()
-    conn.close()
-    print("Cleared existing FAISS data and user database for fresh test.")
-
-    # Try enrolling users. Use your actual image paths here.
-    enroll_user("Alice Smith", person1_image_path)
-    enroll_user("Bob Johnson", person2_image_path)
-    enroll_user("Mandava Pranav", person3_image_path)
-    # enroll_user("Alice Smith", person1_image_path) # Test duplicate enrollment
-
-    # Verify FAISS index and user map
-    faiss_index, user_id_map = load_faiss_data()
-    print(f"Current FAISS index size: {faiss_index.ntotal}")
-    print(f"Current user ID map: {user_id_map}")
-
-    print("--- Enrollment Test Complete ---")
+        if not db.is_closed():
+            db.close()

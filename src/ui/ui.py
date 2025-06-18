@@ -15,12 +15,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QScrollArea,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 # Import recognition system functions
 from core.recognition_system import FaceRecognitionSystem
+from ui.ipc_client import SocketThread
 
 
 class AttendanceUI(QMainWindow):
@@ -52,6 +54,13 @@ class AttendanceUI(QMainWindow):
         self.title_label.setStyleSheet(
             "color: blue; font-size: 24pt; font-weight: bold;"
         )
+
+        # ------------------------------------------------------------------
+        # IPC Socket client setup
+        # ------------------------------------------------------------------
+        self.socket_thread = SocketThread()
+        self.socket_thread.message_received.connect(self.on_ipc_message)
+        self.socket_thread.start()
 
         self.setup_camera()
 
@@ -140,9 +149,18 @@ class AttendanceUI(QMainWindow):
         # Camera feed label below the title
         self.camera_label = QLabel()
         self.camera_label.setAlignment(Qt.AlignCenter)
-        right_layout.addWidget(
-            self.camera_label, 1
-        )  # Stretch factor to fill remaining space
+        right_layout.addWidget(self.camera_label, 1)
+
+        # ------------------------------------------------------------------
+        # Message log below camera view
+        # ------------------------------------------------------------------
+        self.message_view = QTextEdit()
+        self.message_view.setReadOnly(True)
+        self.message_view.setFixedHeight(120)
+        self.message_view.setStyleSheet(
+            "background-color: #F0F0F0; color: black; font-size: 12pt;"
+        )
+        right_layout.addWidget(self.message_view)
 
         # Add widgets to the main layout with appropriate stretch factors
         main_layout.addWidget(left_widget, 1)
@@ -221,6 +239,13 @@ class AttendanceUI(QMainWindow):
                             # New detection - play beep sound and log
                             print(f"*** NEW FACE DETECTED: {detected_name} ***")
                             self.last_detection_state = True
+
+                        # Notify server about detection via IPC
+                        try:
+                            self.socket_thread.send(f"DETECTED:{detected_name}")
+                        except Exception as exc:
+                            print(f"IPC send error: {exc}")
+
                         self.distinct_detections.append(detected_name)
                         del self.distinct_detections[0]
 
@@ -263,7 +288,20 @@ class AttendanceUI(QMainWindow):
         # Clean up camera resources on window close
         print("Shutting down attendance system...")
         self.cap.release()
+        if self.socket_thread.isRunning():
+            self.socket_thread.quit()
         event.accept()
+
+    # ------------------------------------------------------------------
+    # IPC callbacks
+    # ------------------------------------------------------------------
+
+    def on_ipc_message(self, message: str):
+        """Handle messages broadcast by the Flask server."""
+        print(f"[IPC] Message from server: {message}")
+        # Append message to log view
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.message_view.append(f"[{timestamp}] {message}")
 
 
 if __name__ == "__main__":

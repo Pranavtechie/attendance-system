@@ -1,5 +1,5 @@
+import logging
 import os
-import sqlite3
 
 import cv2
 import faiss
@@ -10,7 +10,6 @@ from ai_edge_litert.interpreter import Interpreter
 from src.config import (
     BLAZEFACE_INPUT_SIZE,
     BLAZEFACE_MODEL_PATH,
-    DB_PATH,
     EMBEDDING_DIM,
     FAISS_INDEX_PATH,
     MIN_DETECTION_SCORE,
@@ -19,6 +18,11 @@ from src.config import (
     RECOGNITION_THRESHOLD,
     USER_ID_MAP_PATH,
 )
+from src.db.index import Cadet, db
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # define global anchors variable for BlazeFace
 blaze_face_anchors = None
@@ -203,7 +207,17 @@ def postprocess_blazeface_output(
         raw_regressors, blaze_face_anchors.anchors
     )
     scores = tf.sigmoid(raw_classificators[:, 0]).numpy()
+
+    # Log detection score statistics
+    max_score = np.max(scores) if len(scores) > 0 else 0
+    logger.info(
+        f"BlazeFace detection - Max score: {max_score:.4f} (threshold: {score_threshold})"
+    )
+
     mask = scores >= score_threshold
+    valid_detections = np.sum(mask)
+    logger.info(f"Valid detections above threshold: {valid_detections}/{len(scores)}")
+
     boxes_f = decoded_boxes[mask]
     lands_f = decoded_landmarks[mask]
     scores_f = scores[mask]
@@ -221,26 +235,40 @@ def postprocess_blazeface_output(
         y_max = int(b[2] * h)
         x_min, y_min = max(0, x_min), max(0, y_min)
         x_max, y_max = min(w - 1, x_max), min(h - 1, y_max)
+        logger.info(
+            f"Face detection #{i}: score={score:.4f}, bbox=({x_min},{y_min},{x_max},{y_max})"
+        )
         results.append({"bbox": (x_min, y_min, x_max, y_max), "score": score})
     return results
 
 
-def get_user_name_from_id(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM users WHERE user_id = ?", (user_id,))
-    res = cursor.fetchone()
-    conn.close()
-    return res[0] if res else "Unknown"
+def get_cadet_name_from_unique_id(unique_id):
+    """Get cadet name from unique_id using the Cadet model."""
+    try:
+        if db.is_closed():
+            db.connect(reuse_if_open=True)
+
+        cadet = Cadet.get_or_none(Cadet.uniqueId == unique_id)
+        if cadet:
+            return cadet.name
+        else:
+            logger.warning(f"No cadet found with unique_id: {unique_id}")
+            return "Unknown"
+    except Exception as e:
+        logger.error(f"Error retrieving cadet name for {unique_id}: {e}")
+        return "Unknown"
+    finally:
+        if not db.is_closed():
+            db.close()
 
 
 def load_faiss_data():
     if os.path.exists(FAISS_INDEX_PATH) and os.path.exists(USER_ID_MAP_PATH):
         try:
             index = faiss.read_index(str(FAISS_INDEX_PATH))
-            arr = np.load(USER_ID_MAP_PATH)
-            user_map = arr.tolist() if arr.ndim > 0 else []
-            return index, user_map
+            arr = np.load(USER_ID_MAP_PATH, allow_pickle=True)
+            unique_id_map = arr.tolist() if arr.ndim > 0 else []
+            return index, unique_id_map
         except Exception:
             pass
     # initialize new
@@ -248,15 +276,26 @@ def load_faiss_data():
     return index, []
 
 
-def recognize_face(embedding, faiss_index, user_id_map):
+def recognize_face(embedding, faiss_index, unique_id_map):
     if faiss_index.ntotal == 0:
+        logger.info("No enrolled cadets in FAISS index")
         return "No Enrolled Users"
     D, I = faiss_index.search(embedding.reshape(1, -1), 1)
     sim = D[0][0]
+    logger.info(
+        f"Cosine similarity score: {sim:.4f} (threshold: {RECOGNITION_THRESHOLD})"
+    )
     if sim >= RECOGNITION_THRESHOLD:
-        uid = user_id_map[I[0][0]]
-        return get_user_name_from_id(uid)
+        unique_id = unique_id_map[I[0][0]]
+        cadet_name = get_cadet_name_from_unique_id(unique_id)
+        logger.info(
+            f"Face recognized as: {cadet_name} (unique_id: {unique_id}, similarity: {sim:.4f})"
+        )
+        return cadet_name
     else:
+        logger.info(
+            f"Face not recognized - similarity {sim:.4f} below threshold {RECOGNITION_THRESHOLD}"
+        )
         return "Unknown"
 
 
@@ -267,30 +306,42 @@ class FaceRecognitionSystem:
         print("Initializing face recognition system...")
         self.blazeface_model = TFLiteModel(BLAZEFACE_MODEL_PATH)
         self.mobilefacenet_model = TFLiteModel(MOBILEFACENET_MODEL_PATH)
-        self.faiss_index, self.user_id_map = load_faiss_data()
+        self.faiss_index, self.unique_id_map = load_faiss_data()
 
     def detect_and_recognize(self, frame_rgb):
         try:
             original_shape = frame_rgb.shape
+            logger.info(f"Processing frame of shape: {original_shape}")
             # 1. Detect
             inp = preprocess_image_blazeface(frame_rgb)
             regs, clss = self.blazeface_model.run(inp)
             faces = postprocess_blazeface_output(regs, clss, original_shape)
             if not faces:
+                logger.info("No faces detected in frame")
                 return "No face detected"
             x1, y1, x2, y2 = faces[0]["bbox"]
+            detection_score = faces[0]["score"]
+            logger.info(f"Using best face detection with score: {detection_score:.4f}")
             if x2 <= x1 or y2 <= y1:
+                logger.warning("Invalid bounding box detected")
                 return "No face detected"
             roi = frame_rgb[y1:y2, x1:x2]
             if roi.size == 0:
+                logger.warning("Empty ROI extracted")
                 return "No face detected"
+            logger.info(f"Extracted face ROI of size: {roi.shape}")
             # 2. Embed
             inp2 = preprocess_image_mobilefacenet(roi)
             emb_out = self.mobilefacenet_model.run(inp2)[0].flatten().astype(np.float32)
             emb = emb_out / np.linalg.norm(emb_out)
+            logger.info(f"Generated embedding with norm: {np.linalg.norm(emb):.4f}")
+
+            # ---- Refresh FAISS so we always see new enrolments ----
+            self.faiss_index, self.unique_id_map = load_faiss_data()
+
             # 3. Recognize
-            name = recognize_face(emb, self.faiss_index, self.user_id_map)
+            name = recognize_face(emb, self.faiss_index, self.unique_id_map)
             return name
         except Exception as e:
-            print(f"Error in detection/recognition: {e}")
+            logger.error(f"Error in detection/recognition: {e}")
             return "Detection error"
