@@ -12,9 +12,11 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMainWindow,
-    QScrollArea,
+    QTableWidget,
+    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -22,6 +24,11 @@ from PySide6.QtWidgets import (
 
 # Import recognition system functions
 from core.recognition_system import FaceRecognitionSystem
+
+# ------------------------------------------------------------------
+# Database models (for dynamic room statistics)
+# ------------------------------------------------------------------
+from db.index import Person, Room, db
 from ui.ipc_client import SocketThread
 
 
@@ -102,34 +109,47 @@ class AttendanceUI(QMainWindow):
         session_label.setStyleSheet("color: white; font-size: 24pt;")
         left_layout.addWidget(session_label)
 
-        # Attendance count moved below morning session with doubled font size
-        attendance_label = QLabel("240/241")
-        attendance_label.setStyleSheet(
+        # Overall attendance counter – will be kept in sync with table data
+        self.attendance_label = QLabel("0/0")
+        self.attendance_label.setStyleSheet(
             "color: white; font-size: 48pt; font-weight: bold;"
         )
-        left_layout.addWidget(attendance_label)
+        left_layout.addWidget(self.attendance_label)
 
-        # Room list in a scrollable area
-        rooms = [
-            "Jhansi : 23/24",
-            "Aakash : 23/24",
-            "Pruthvi : 23/24",
-            "Virat : 23/24",
-            "Sindhurakshak : 23/24",
-            "Cheetah : 23/24",
-            "Tejas : 23/24",
-        ]
-        room_widget = QWidget()
-        room_layout = QVBoxLayout(room_widget)
-        for room in rooms:
-            label = QLabel(room)
-            label.setStyleSheet("color: white; font-size: 16pt; padding: 2px;")
-            room_layout.addWidget(label)
+        # ------------------------------------------------------------------
+        # Dynamic room attendance table
+        # ------------------------------------------------------------------
+        self.rooms_table = QTableWidget()
+        self.rooms_table.setColumnCount(4)
+        self.rooms_table.setHorizontalHeaderLabels(
+            [
+                "Room",
+                "Total",
+                "Present",
+                "Pending",
+            ]
+        )
+        self.rooms_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.rooms_table.verticalHeader().setVisible(False)
+        self.rooms_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
-        room_scroll = QScrollArea()
-        room_scroll.setWidget(room_widget)
-        room_scroll.setWidgetResizable(True)
-        left_layout.addWidget(room_scroll)
+        # ------------------------------------------------------------------
+        # Style: double default font size for cells and bold header
+        # ------------------------------------------------------------------
+        cell_font = self.rooms_table.font()
+        cell_font.setPointSize(cell_font.pointSize() * 2)
+        self.rooms_table.setFont(cell_font)
+
+        header = self.rooms_table.horizontalHeader()
+        header_font = header.font()
+        header_font.setBold(True)
+        header_font.setPointSize(header_font.pointSize() * 1.25)
+        header.setFont(header_font)
+
+        # Populate table from DB
+        self.load_room_data()
+
+        left_layout.addWidget(self.rooms_table)
 
         # Right section with lighter gray background
         right_widget = QWidget()
@@ -223,7 +243,7 @@ class AttendanceUI(QMainWindow):
                     "System not ready",
                     "Unknown",
                 ]:
-                    # Face detected and recogni
+                    # Face detected and recognised
                     if self.date != date.today():
                         self.date = date.today()
                         self.attendance_cache = {}
@@ -249,30 +269,70 @@ class AttendanceUI(QMainWindow):
                         self.distinct_detections.append(detected_name)
                         del self.distinct_detections[0]
 
+                        # --------------------------------------------------
+                        # Update dynamic room statistics
+                        # --------------------------------------------------
+                        try:
+                            person = Person.get_or_none(Person.name == detected_name)
+                            # Update statistics only for cadets (exclude staff)
+                            if person and person.personType == "Cadet":
+                                room_id = person.roomId
+                                if person.uniqueId not in self.present_per_room.get(
+                                    room_id, set()
+                                ):
+                                    self.present_per_room.setdefault(
+                                        room_id, set()
+                                    ).add(person.uniqueId)
+                                    self.update_room_present(room_id)
+                        except Exception as e:
+                            print(f"Room stats update error: {e}")
+
                     else:
                         print("Duplicate Face ", detected_name)
 
                     print(self.distinct_detections)
-                    self.title_label.setText(f"Detected: {detected_name}")
+
+                    # ------------------------------------------------------
+                    # Simplified top label display
+                    # ------------------------------------------------------
+                    try:
+                        person = (
+                            person
+                            if "person" in locals()
+                            else Person.get_or_none(Person.name == detected_name)
+                        )
+                        if person:
+                            if person.personType == "Cadet":
+                                display_text = (
+                                    f"{person.admissionNumber} - {person.name}"
+                                )
+                            else:
+                                display_text = person.name
+                        else:
+                            # Fallback – shouldn't normally occur
+                            display_text = detected_name
+                    except Exception:
+                        display_text = detected_name
+
+                    self.title_label.setText(display_text)
                     self.title_label.setStyleSheet(
                         "color: green; font-size: 24pt; font-weight: bold;"
                     )
-                elif detected_name == "No face detected":
-                    # No face detected
-                    if self.last_detection_state:
-                        print("Face detection lost")
-                        self.last_detection_state = False
-                    self.title_label.setText("No face detected")
-                    self.title_label.setStyleSheet(
-                        "color: red; font-size: 24pt; font-weight: bold;"
-                    )
                 else:
-                    # Error states
-                    self.last_detection_state = False
-                    self.title_label.setText(detected_name)
-                    self.title_label.setStyleSheet(
-                        "color: orange; font-size: 24pt; font-weight: bold;"
-                    )
+                    # For all non-recognition states (no face, unknown, errors) – clear label
+                    if self.last_detection_state and detected_name in [
+                        "No face detected",
+                        "Unknown",
+                        "Detection error",
+                        "System not ready",
+                    ]:
+                        # Reset detection state when face is lost or becomes unknown
+                        print("Face detection lost or unknown face")
+                        self.last_detection_state = False
+
+                    self.title_label.setText("")
+                    # Keep previous style but could adjust if desired
+                    # self.title_label.setStyleSheet("color: grey; font-size: 24pt; font-weight: bold;")
 
             # Display the camera frame
             h, w, ch = frame_rgb.shape
@@ -302,6 +362,70 @@ class AttendanceUI(QMainWindow):
         # Append message to log view
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.message_view.append(f"[{timestamp}] {message}")
+
+    # ------------------------------------------------------------------
+    # Helpers for dynamic room statistics
+    # ------------------------------------------------------------------
+
+    def load_room_data(self):
+        """Initialise room statistics and fill the QTableWidget."""
+        if db.is_closed():
+            db.connect(reuse_if_open=True)
+
+        rooms = list(Room.select())
+
+        self.room_row_index = {}
+        self.present_per_room = {}
+        self.room_stats = []  # Keeps total counts per room
+
+        self.rooms_table.setRowCount(len(rooms))
+
+        for idx, room in enumerate(rooms):
+            # Count only cadets (exclude staff) assigned to this room
+            total = (
+                Person.select()
+                .where((Person.roomId == room.roomId) & (Person.personType == "Cadet"))
+                .count()
+                if room.roomId
+                else 0
+            )
+
+            # Cache
+            self.room_stats.append({"roomId": room.roomId, "total": total})
+            self.room_row_index[room.roomId] = idx
+            self.present_per_room[room.roomId] = set()
+
+            # Populate table
+            self.rooms_table.setItem(idx, 0, QTableWidgetItem(room.roomName))
+
+            # Create number cells and center-align them
+            num_cols_values = [(1, total), (2, 0), (3, total)]
+            for col, val in num_cols_values:
+                item = QTableWidgetItem(str(val))
+                item.setTextAlignment(Qt.AlignCenter)
+                self.rooms_table.setItem(idx, col, item)
+
+        self.total_cadets = sum(stat["total"] for stat in self.room_stats)
+        self.update_attendance_label()
+
+    def update_room_present(self, room_id: str):
+        """Refresh a single row in the table after a new detection."""
+        row = self.room_row_index.get(room_id)
+        if row is None:
+            return
+
+        present_cnt = len(self.present_per_room[room_id])
+        total_cnt = int(self.rooms_table.item(row, 1).text())
+
+        self.rooms_table.item(row, 2).setText(str(present_cnt))
+        self.rooms_table.item(row, 3).setText(str(total_cnt - present_cnt))
+
+        self.update_attendance_label()
+
+    def update_attendance_label(self):
+        """Update the big attendance ratio label under the session header."""
+        present_total = sum(len(s) for s in self.present_per_room.values())
+        self.attendance_label.setText(f"{present_total}/{self.total_cadets}")
 
 
 if __name__ == "__main__":

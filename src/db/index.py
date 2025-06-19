@@ -1,17 +1,20 @@
 from peewee import CharField, DateTimeField, Model, SqliteDatabase
 
-db = SqliteDatabase('kcc.db')
+db = SqliteDatabase("kcc.db")
 
-class Cadet(Model):
+
+class Person(Model):
     uniqueId = CharField(primary_key=True)
-    name = CharField()
+    name = CharField(null=False)
     admissionNumber = CharField()
     roomId = CharField()
-    pictureFileName = CharField()
+    pictureFileName = CharField(null=False)
+    personType = CharField(null=False)  # Cadet, Employee
     syncedAt = DateTimeField()
 
     class Meta:
         database = db
+
 
 class Room(Model):
     roomId = CharField(primary_key=True)
@@ -20,26 +23,29 @@ class Room(Model):
 
     class Meta:
         database = db
-    
+
 
 class CadetAttendance(Model):
-    uniqueId = CharField()
+    personId = CharField()
     attendanceTimeStamp = DateTimeField()
     sessionId = CharField()
     syncedAt = DateTimeField()
 
     class Meta:
-        database = db  
+        database = db
+
 
 class Session(Model):
     sessionId = CharField(primary_key=True)
-    sessionTimestamp = DateTimeField()
+    startAt = DateTimeField()
+    endedAt = DateTimeField()
     syncedAt = DateTimeField()
 
     class Meta:
         database = db
 
+
 if __name__ == "__main__":
     db.connect()
-    db.create_tables([Cadet, Room, CadetAttendance, Session], safe=True)
+    db.create_tables([Person, Room, CadetAttendance, Session], safe=True)
     db.close()

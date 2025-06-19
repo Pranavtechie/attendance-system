@@ -10,7 +10,7 @@ from uuid_extensions import uuid7str
 
 from src.config import ENROLLMENT_IMAGES_DIR
 from src.core.enrollment_processor import enroll_user
-from src.db.index import Cadet, CadetAttendance, Room, Session, db
+from src.db.index import CadetAttendance, Person, Room, Session, db
 from src.ipc.socket_server import broadcast_message  # IPC helper
 
 
@@ -79,6 +79,15 @@ def enroll():
 
     picture_url = data.get("pictureUrl")
 
+    admission_number = data.get("admissionNumber")
+
+    person_type = ""
+
+    if admission_number is None or admission_number == "":
+        person_type = "Employee"
+    else:
+        person_type = "Cadet"
+
     # --- Validate and download the image --- #
     if not picture_url:
         return {"message": "pictureUrl missing from payload"}, 400
@@ -114,12 +123,13 @@ def enroll():
         return {"message": "Error downloading image", "error": str(e)}, 500
 
     try:
-        Cadet.insert(
+        Person.insert(
             uniqueId=data["uniqueId"],
             name=data["preferredName"],
             admissionNumber=data["admissionNumber"],
             roomId=data["roomId"],
             pictureFileName=filename,
+            personType=person_type,
             syncedAt=syncedAt,
         ).on_conflict_replace().execute()
 
@@ -158,6 +168,88 @@ def ipc_send():
 
     broadcast_message(message)
     return {"status": "Message broadcasted", "message": message}, 200
+
+
+@app.route("/setup-rooms", methods=["POST"])
+def setup_rooms():
+    rooms = [
+        {
+            "unique_id": "01978221-6a29-70f0-99f0-996d856ecf47",
+            "room_name": "Jhansi",
+            "warden_name": None,
+            "created_at": "2025-06-18 08:21:57.417",
+            "updated_at": "2025-06-18 08:21:57.426",
+            "gender": "Female",
+            "place": "0-Left",
+        },
+        {
+            "unique_id": "01978221-769d-768f-894e-e833a9cbcfd4",
+            "room_name": "Aakash",
+            "warden_name": None,
+            "created_at": "2025-06-18 08:22:00.605",
+            "updated_at": "2025-06-18 08:22:00.607",
+            "gender": "Male",
+            "place": "1-Left",
+        },
+        {
+            "unique_id": "01978221-819e-734c-a2f0-7e58b7ebd42d",
+            "room_name": "Prithvi",
+            "warden_name": None,
+            "created_at": "2025-06-18 08:22:03.422",
+            "updated_at": "2025-06-18 08:22:03.423",
+            "gender": "Male",
+            "place": "1-Right",
+        },
+        {
+            "unique_id": "01978221-87db-750a-b10e-119bdc4b88be",
+            "room_name": "Viraat",
+            "warden_name": None,
+            "created_at": "2025-06-18 08:22:05.019",
+            "updated_at": "2025-06-18 08:22:05.021",
+            "gender": "Male",
+            "place": "2-Left",
+        },
+        {
+            "unique_id": "01978221-8f44-70d6-88f3-b459ac5273df",
+            "room_name": "Sindhurakshak",
+            "warden_name": None,
+            "created_at": "2025-06-18 08:22:06.916",
+            "updated_at": "2025-06-18 08:22:06.918",
+            "gender": "Male",
+            "place": "2-Right",
+        },
+        {
+            "unique_id": "01978221-9589-726c-98d8-64b502ca02dc",
+            "room_name": "Chetak",
+            "warden_name": None,
+            "created_at": "2025-06-18 08:22:08.521",
+            "updated_at": "2025-06-18 08:22:08.522",
+            "gender": "Male",
+            "place": "3-Left",
+        },
+        {
+            "unique_id": "01978221-9cf8-72ea-bbf5-1ad2a85b5393",
+            "room_name": "Cheetah",
+            "warden_name": None,
+            "created_at": "2025-06-18 08:22:10.424",
+            "updated_at": "2025-06-18 08:22:10.426",
+            "gender": "Male",
+            "place": "3-Right",
+        },
+    ]
+
+    try:
+        for room in rooms:
+            Room.insert(
+                roomId=room["unique_id"],
+                roomName=room["room_name"],
+                syncedAt=ist_timestamp(),
+            ).on_conflict_replace().execute()
+    except Exception as e:
+        print(e)
+        return {"message": "Failed to setup rooms", "error": str(e)}, 500
+
+    return {"message": "Rooms setup successfully"}, 200
 
 
 if __name__ == "__main__":

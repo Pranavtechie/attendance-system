@@ -16,7 +16,7 @@ from src.config import (
     MOBILEFACENET_MODEL_PATH,
     USER_ID_MAP_PATH,
 )
-from src.db.index import Cadet, db
+from src.db.index import Person, db
 
 # --- Configuration based on your model inspection ---
 # BLAZEFACE_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_detection_front.tflite")
@@ -415,7 +415,7 @@ def enroll_user(unique_id, image_path):
 
     try:
         # Check if cadet exists in database
-        cadet = Cadet.get_or_none(Cadet.uniqueId == unique_id)
+        cadet = Person.get_or_none(Person.uniqueId == unique_id)
         if not cadet:
             print(f"Error: No cadet found with unique_id: {unique_id}")
             return False

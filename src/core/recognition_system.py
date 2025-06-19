@@ -18,7 +18,7 @@ from src.config import (
     RECOGNITION_THRESHOLD,
     USER_ID_MAP_PATH,
 )
-from src.db.index import Cadet, db
+from src.db.index import Person, db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -242,20 +242,20 @@ def postprocess_blazeface_output(
     return results
 
 
-def get_cadet_name_from_unique_id(unique_id):
-    """Get cadet name from unique_id using the Cadet model."""
+def get_person_name_from_unique_id(unique_id):
+    """Get person name from unique_id using the person model."""
     try:
         if db.is_closed():
             db.connect(reuse_if_open=True)
 
-        cadet = Cadet.get_or_none(Cadet.uniqueId == unique_id)
-        if cadet:
-            return cadet.name
+        person = Person.get_or_none(Person.uniqueId == unique_id)
+        if person:
+            return person.name
         else:
-            logger.warning(f"No cadet found with unique_id: {unique_id}")
+            logger.warning(f"No person found with unique_id: {unique_id}")
             return "Unknown"
     except Exception as e:
-        logger.error(f"Error retrieving cadet name for {unique_id}: {e}")
+        logger.error(f"Error retrieving person name for {unique_id}: {e}")
         return "Unknown"
     finally:
         if not db.is_closed():
@@ -278,7 +278,7 @@ def load_faiss_data():
 
 def recognize_face(embedding, faiss_index, unique_id_map):
     if faiss_index.ntotal == 0:
-        logger.info("No enrolled cadets in FAISS index")
+        logger.info("No enrolled persons in FAISS index")
         return "No Enrolled Users"
     D, I = faiss_index.search(embedding.reshape(1, -1), 1)
     sim = D[0][0]
@@ -287,11 +287,11 @@ def recognize_face(embedding, faiss_index, unique_id_map):
     )
     if sim >= RECOGNITION_THRESHOLD:
         unique_id = unique_id_map[I[0][0]]
-        cadet_name = get_cadet_name_from_unique_id(unique_id)
+        person_name = get_person_name_from_unique_id(unique_id)
         logger.info(
-            f"Face recognized as: {cadet_name} (unique_id: {unique_id}, similarity: {sim:.4f})"
+            f"Face recognized as: {person_name} (unique_id: {unique_id}, similarity: {sim:.4f})"
         )
-        return cadet_name
+        return person_name
     else:
         logger.info(
             f"Face not recognized - similarity {sim:.4f} below threshold {RECOGNITION_THRESHOLD}"
