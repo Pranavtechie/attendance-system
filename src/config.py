@@ -20,3 +20,14 @@ RECOGNITION_THRESHOLD = 0.4
 MIN_DETECTION_SCORE = 0.7
 
 SOCKET_PATH = Path("/tmp/app.sock")
+
+# -----------------------------------------------------------------------------
+# Logging configuration paths
+# -----------------------------------------------------------------------------
+
+LOG_DIR = ROOT_DIR / "logs"
+
+# Default log file for the application (can be overridden in log_config.py)
+DEFAULT_LOG_FILE = LOG_DIR / "attendance-system.log"
+
+WAIT_TIME_AFTER_RECOGNITION_MS = 800  # Time (in milliseconds) to pause the camera feed after a successful recognition

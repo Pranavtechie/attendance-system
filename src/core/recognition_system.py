@@ -21,7 +21,6 @@ from src.config import (
 from src.db.index import Person, db
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # define global anchors variable for BlazeFace

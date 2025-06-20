@@ -23,6 +23,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# ------------------------------------------------------------------
+# Configurations
+# ------------------------------------------------------------------
+from config import WAIT_TIME_AFTER_RECOGNITION_MS
+
 # Import recognition system functions
 from core.recognition_system import FaceRecognitionSystem
 
@@ -311,6 +316,12 @@ class AttendanceUI(QMainWindow):
                         except Exception as e:
                             print(f"Room stats update error: {e}")
 
+                        # --------------------------------------------------
+                        # Pause camera updates briefly so the recognised
+                        # frame stays visible before capturing again.
+                        # --------------------------------------------------
+                        self.pause_after_recognition()
+
                     else:
                         print("Duplicate Face ", detected_name)
 
@@ -450,6 +461,22 @@ class AttendanceUI(QMainWindow):
         """Update the big attendance ratio label under the session header."""
         present_total = sum(len(s) for s in self.present_per_room.values())
         self.attendance_label.setText(f"{present_total}/{self.total_cadets}")
+
+    # ------------------------------------------------------------------
+    # Helpers for pausing/resuming camera capture
+    # ------------------------------------------------------------------
+
+    def pause_after_recognition(self):
+        """Temporarily stop the camera timer after a successful recognition."""
+        if hasattr(self, "timer") and self.timer.isActive():
+            self.timer.stop()
+            # Resume after the configured wait time
+            QTimer.singleShot(WAIT_TIME_AFTER_RECOGNITION_MS, self.resume_camera)
+
+    def resume_camera(self):
+        """Restart the periodic camera capture timer."""
+        if hasattr(self, "timer") and not self.timer.isActive():
+            self.timer.start(40)  # Restore the original frame interval
 
 
 if __name__ == "__main__":
