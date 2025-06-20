@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime
 from urllib.parse import urlparse
@@ -11,7 +12,10 @@ from uuid_extensions import uuid7str
 from src.config import ENROLLMENT_IMAGES_DIR
 from src.core.enrollment_processor import enroll_user
 from src.db.index import CadetAttendance, Person, Room, Session, db
-from src.ipc.socket_server import broadcast_message  # IPC helper
+from src.ipc.socket_server import (  # IPC helper
+    broadcast_message,
+    register_event_handler,
+)
 
 
 def ist_timestamp():
@@ -250,6 +254,74 @@ def setup_rooms():
         return {"message": "Failed to setup rooms", "error": str(e)}, 500
 
     return {"message": "Rooms setup successfully"}, 200
+
+
+# ---------------------------------------------------------------------------
+# IPC message handling
+# ---------------------------------------------------------------------------
+
+
+def _mark_attendance_remote(person_id: str, attendanceTimeStamp: str):
+    """Send attendance mark request to the remote Axon API and return the
+    `syncedAt` timestamp if the call is successful. Returns None on failure.
+    """
+    url = "https://api.korukondacoachingcenter.com/axon/mark-attendance"
+    try:
+        resp = req.post(
+            url,
+            json={"personId": person_id, "attendanceTimeStamp": attendanceTimeStamp},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            print(
+                f"[Attendance] Remote API error {resp.status_code}: {resp.text[:200]}"
+            )
+            return None
+        data = resp.json()
+        return data.get("syncedAt")
+    except Exception as exc:
+        print(f"[Attendance] Remote API request failed: {exc}")
+        return None
+
+
+def _handle_ipc_message(message: str):
+    """Callback invoked for every message received over the IPC socket."""
+    try:
+        payload = json.loads(message)
+    except json.JSONDecodeError:
+        # Ignore non-JSON messages
+        return
+
+    action = payload.get("action")
+    data = payload.get("data", {}) or {}
+
+    if action == "person-recognized":
+        person_id = data.get("personId")
+        attendanceTimeStamp = data.get("attendanceTimeStamp")
+        if not person_id:
+            print("[Attendance] person-recognized payload missing personId")
+            return
+
+        synced_at = _mark_attendance_remote(person_id, attendanceTimeStamp)
+
+        # Persist to local DB regardless of remote sync success
+        try:
+            if db.is_closed():
+                db.connect(reuse_if_open=True)
+
+            CadetAttendance.insert(
+                personId=person_id,
+                attendanceTimeStamp=datetime.now(),
+                sessionId="",  # TODO: store actual session when available
+                syncedAt=synced_at,
+            ).execute()
+        except Exception as exc:
+            print(f"[Attendance] DB write error: {exc}")
+
+
+# Register the handler as soon as the module is imported so that the socket
+# server can forward messages.
+register_event_handler(_handle_ipc_message)
 
 
 if __name__ == "__main__":

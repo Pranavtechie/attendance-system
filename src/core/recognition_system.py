@@ -210,9 +210,9 @@ def postprocess_blazeface_output(
 
     # Log detection score statistics
     max_score = np.max(scores) if len(scores) > 0 else 0
-    logger.info(
-        f"BlazeFace detection - Max score: {max_score:.4f} (threshold: {score_threshold})"
-    )
+    # logger.info(
+    #    f"BlazeFace detection - Max score: {max_score:.4f} (threshold: {score_threshold})"
+    # )
 
     mask = scores >= score_threshold
     valid_detections = np.sum(mask)
@@ -235,9 +235,9 @@ def postprocess_blazeface_output(
         y_max = int(b[2] * h)
         x_min, y_min = max(0, x_min), max(0, y_min)
         x_max, y_max = min(w - 1, x_max), min(h - 1, y_max)
-        logger.info(
-            f"Face detection #{i}: score={score:.4f}, bbox=({x_min},{y_min},{x_max},{y_max})"
-        )
+        # logger.info(
+        #    f"Face detection #{i}: score={score:.4f}, bbox=({x_min},{y_min},{x_max},{y_max})"
+        # )
         results.append({"bbox": (x_min, y_min, x_max, y_max), "score": score})
     return results
 
@@ -293,9 +293,9 @@ def recognize_face(embedding, faiss_index, unique_id_map):
         )
         return person_name
     else:
-        logger.info(
-            f"Face not recognized - similarity {sim:.4f} below threshold {RECOGNITION_THRESHOLD}"
-        )
+        # logger.info(
+        #    f"Face not recognized - similarity {sim:.4f} below threshold {RECOGNITION_THRESHOLD}"
+        # )
         return "Unknown"
 
 
@@ -311,30 +311,30 @@ class FaceRecognitionSystem:
     def detect_and_recognize(self, frame_rgb):
         try:
             original_shape = frame_rgb.shape
-            logger.info(f"Processing frame of shape: {original_shape}")
+            # logger.info(f"Processing frame of shape: {original_shape}")
             # 1. Detect
             inp = preprocess_image_blazeface(frame_rgb)
             regs, clss = self.blazeface_model.run(inp)
             faces = postprocess_blazeface_output(regs, clss, original_shape)
             if not faces:
-                logger.info("No faces detected in frame")
+                # logger.info("No faces detected in frame")
                 return "No face detected"
             x1, y1, x2, y2 = faces[0]["bbox"]
             detection_score = faces[0]["score"]
-            logger.info(f"Using best face detection with score: {detection_score:.4f}")
+            # logger.info(f"Using best face detection with score: {detection_score:.4f}")
             if x2 <= x1 or y2 <= y1:
-                logger.warning("Invalid bounding box detected")
+                # logger.warning("Invalid bounding box detected")
                 return "No face detected"
             roi = frame_rgb[y1:y2, x1:x2]
             if roi.size == 0:
-                logger.warning("Empty ROI extracted")
+                # logger.warning("Empty ROI extracted")
                 return "No face detected"
-            logger.info(f"Extracted face ROI of size: {roi.shape}")
+            # logger.info(f"Extracted face ROI of size: {roi.shape}")
             # 2. Embed
             inp2 = preprocess_image_mobilefacenet(roi)
             emb_out = self.mobilefacenet_model.run(inp2)[0].flatten().astype(np.float32)
             emb = emb_out / np.linalg.norm(emb_out)
-            logger.info(f"Generated embedding with norm: {np.linalg.norm(emb):.4f}")
+            # logger.info(f"Generated embedding with norm: {np.linalg.norm(emb):.4f}")
 
             # ---- Refresh FAISS so we always see new enrolments ----
             self.faiss_index, self.unique_id_map = load_faiss_data()

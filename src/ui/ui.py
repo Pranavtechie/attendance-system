@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from datetime import date, datetime, time
@@ -260,11 +261,34 @@ class AttendanceUI(QMainWindow):
                             print(f"*** NEW FACE DETECTED: {detected_name} ***")
                             self.last_detection_state = True
 
-                        # Notify server about detection via IPC
+                        # --------------------------------------------------
+                        # Notify server about recognition via IPC JSON payload
+                        # --------------------------------------------------
                         try:
-                            self.socket_thread.send(f"DETECTED:{detected_name}")
-                        except Exception as exc:
-                            print(f"IPC send error: {exc}")
+                            # Retrieve Person record once so it can be reused
+                            person = Person.get_or_none(Person.name == detected_name)
+                        except Exception as e:
+                            print(f"DB lookup error: {e}")
+                            person = None
+
+                        if person is not None:
+                            payload = json.dumps(
+                                {
+                                    "action": "person-recognized",
+                                    "data": {
+                                        "personId": person.uniqueId,
+                                        "attendanceTimeStamp": datetime.now().isoformat(),
+                                    },
+                                }
+                            )
+                            try:
+                                self.socket_thread.send(payload)
+                            except Exception as exc:
+                                print(f"IPC send error: {exc}")
+                        else:
+                            print(
+                                "Person record not found for detected name - IPC not sent"
+                            )
 
                         self.distinct_detections.append(detected_name)
                         del self.distinct_detections[0]

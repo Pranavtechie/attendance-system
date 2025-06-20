@@ -6,6 +6,18 @@ from typing import List
 
 from src.config import SOCKET_PATH
 
+# New global event handler for received messages
+_event_handler = None
+
+
+def register_event_handler(handler):
+    """Register a callable that will be invoked for every message received
+    from any UI client. The callable must accept a single `str` argument –
+    the raw message string received over IPC.
+    """
+    global _event_handler
+    _event_handler = handler
+
 
 class _Client:
     """Internal helper to manage read/write loops for a connected UI client."""
@@ -47,9 +59,18 @@ class _Client:
                 data = self._conn.recv(1024).decode()
                 if not data:
                     break
-                # Currently we only log incoming messages, but this is where
-                # server-side handling can be attached.
-                print(f"[IPC] Received from UI: {data}")
+                # Forward the message to any registered handler; fallback to
+                # simple logging if no handler is set or the handler errors
+                # out.
+                handled = False
+                if _event_handler is not None:
+                    try:
+                        _event_handler(data)
+                        handled = True
+                    except Exception as exc:
+                        print(f"[IPC] Handler error: {exc}")
+                if not handled:
+                    print(f"[IPC] Received from UI: {data}")
         except Exception as exc:
             print(f"[IPC] Receive error: {exc}")
         finally:
