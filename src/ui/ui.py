@@ -152,6 +152,24 @@ class AttendanceUI(QMainWindow):
         header_font.setPointSize(header_font.pointSize() * 1.25)
         header.setFont(header_font)
 
+        # ------------------------------------------------------------------
+        # Ensure consistent table colors across platforms (macOS, Ubuntu, etc.)
+        # ------------------------------------------------------------------
+        self.rooms_table.setStyleSheet(
+            """
+            QTableWidget {
+                color: white;                /* cell text */
+                background-color: #2C2F33;  /* match parent background */
+                gridline-color: #555555;    /* subtle grid lines */
+            }
+            QHeaderView::section {
+                background-color: #2C2F33;  /* header background */
+                color: white;               /* header text colour */
+                font-weight: bold;
+            }
+            """
+        )
+
         # Populate table from DB
         self.load_room_data()
 
