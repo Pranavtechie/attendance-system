@@ -24,7 +24,7 @@ def ist_timestamp():
     dt = dt.replace(
         microsecond=milliseconds * 1000
     )  # Set precision to 3 decimal places
-    return dt.isoformat()
+    return dt.isoformat()a
 
 
 def string_to_timestamp(s):
@@ -184,7 +184,7 @@ def setup_rooms():
             "created_at": "2025-06-18 08:21:57.417",
             "updated_at": "2025-06-18 08:21:57.426",
             "gender": "Female",
-            "place": "0-Left",
+            "place": "0-Left",``
         },
         {
             "unique_id": "01978221-769d-768f-894e-e833a9cbcfd4",
