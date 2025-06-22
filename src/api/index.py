@@ -96,26 +96,40 @@ def enroll():
 
     local_path = os.path.join(ENROLLMENT_IMAGES_DIR, filename)
 
-    try:
-        response = req.get(picture_url, timeout=15)
-        if response.status_code != 200:
-            return {
-                "message": "Failed to download image",
-                "status": response.status_code,
-            }, 502
+    # ------------------------------------------------------------
+    # Download the image if it is not already present locally.
+    # This avoids unnecessary network calls and file overwrites
+    # when the same image has already been cached on disk.
+    # ------------------------------------------------------------
 
-        # Basic content‐type validation (allows e.g. image/jpeg)
-        content_type = response.headers.get("Content-Type", "")
-        if "image/jpeg" not in content_type.lower():
-            return {"message": "URL does not point to a JPEG image"}, 400
+    downloaded_now = False  # Track whether we fetched the file in this request
 
-        # Write the image to disk
-        with open(local_path, "wb") as f:
-            f.write(response.content)
+    if not os.path.exists(local_path):
+        try:
+            response = req.get(picture_url, timeout=15)
+            if response.status_code != 200:
+                return {
+                    "message": "Failed to download image",
+                    "status": response.status_code,
+                }, 502
 
-    except Exception as e:
-        print(e)
-        return {"message": "Error downloading image", "error": str(e)}, 500
+            # Basic content‐type validation (allows e.g. image/jpeg)
+            content_type = response.headers.get("Content-Type", "")
+            if "image/jpeg" not in content_type.lower():
+                return {"message": "URL does not point to a JPEG image"}, 400
+
+            # Write the image to disk
+            with open(local_path, "wb") as f:
+                f.write(response.content)
+
+            downloaded_now = True  # Mark that we downloaded the file
+
+        except Exception as e:
+            print(e)
+            return {"message": "Error downloading image", "error": str(e)}, 500
+    else:
+        # Reuse the cached image instead of downloading again
+        print(f"[Enroll] Reusing cached image {local_path}")
 
     try:
         if data["userType"] == "Cadet":
@@ -138,9 +152,9 @@ def enroll():
             ).on_conflict_replace().execute()
 
     except Exception as e:
-        # Cleanup the saved image if DB write fails
+        # Cleanup the saved image only if we downloaded it in this request
         print(e)
-        if os.path.exists(local_path):
+        if downloaded_now and os.path.exists(local_path):
             try:
                 os.remove(local_path)
             except OSError:
