@@ -24,7 +24,7 @@ def ist_timestamp():
     dt = dt.replace(
         microsecond=milliseconds * 1000
     )  # Set precision to 3 decimal places
-    return dt.isoformat()a
+    return dt.isoformat()
 
 
 def string_to_timestamp(s):
