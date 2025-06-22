@@ -81,16 +81,7 @@ def enroll():
     print(data)
     syncedAt = ist_timestamp()
 
-    picture_url = data.get("pictureUrl")
-
-    admission_number = data.get("admissionNumber")
-
-    person_type = ""
-
-    if admission_number is None or admission_number == "":
-        person_type = "Employee"
-    else:
-        person_type = "Cadet"
+    picture_url = data.get("picture")
 
     # --- Validate and download the image --- #
     if not picture_url:
@@ -127,15 +118,24 @@ def enroll():
         return {"message": "Error downloading image", "error": str(e)}, 500
 
     try:
-        Person.insert(
-            uniqueId=data["uniqueId"],
-            name=data["preferredName"],
-            admissionNumber=data["admissionNumber"],
-            roomId=data["roomId"],
-            pictureFileName=filename,
-            personType=person_type,
-            syncedAt=syncedAt,
-        ).on_conflict_replace().execute()
+        if data["userType"] == "Cadet":
+            Person.insert(
+                uniqueId=data["personId"],
+                name=data["preferredName"],
+                admissionNumber=data["admissionNumber"],
+                roomId=data["roomId"],
+                pictureFileName=filename,
+                personType=data["userType"],
+                syncedAt=syncedAt,
+            ).on_conflict_replace().execute()
+        elif data["userType"] == "Employee":
+            print("\n\n usingi employee ")
+            Person.insert(
+                uniqueId=data["personId"],
+                name=data["preferredName"],
+                pictureFileName=filename,
+                personType=data["userType"],
+            ).on_conflict_replace().execute()
 
     except Exception as e:
         # Cleanup the saved image if DB write fails
@@ -148,7 +148,7 @@ def enroll():
         return {"message": "Enrollment failed", "error": str(e)}, 500
 
     try:
-        enroll_user(data["uniqueId"], local_path)
+        enroll_user(data["personId"], local_path)
     except Exception as e:
         print(e)
         return {

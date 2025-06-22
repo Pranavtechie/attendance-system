@@ -9,3 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+logs/
+enrollment_images/
+
+# sqlite db
+kcc.db
+*.db.bak
+
+.env

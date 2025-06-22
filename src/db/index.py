@@ -6,11 +6,11 @@ db = SqliteDatabase("kcc.db")
 class Person(Model):
     uniqueId = CharField(primary_key=True)
     name = CharField(null=False)
-    admissionNumber = CharField()
-    roomId = CharField()
+    admissionNumber = CharField(null=True)
+    roomId = CharField(null=True)
     pictureFileName = CharField(null=False)
     personType = CharField(null=False)  # Cadet, Employee
-    syncedAt = DateTimeField()
+    syncedAt = DateTimeField(null=True)
 
     class Meta:
         database = db
