@@ -111,9 +111,9 @@ class AttendanceUI(QMainWindow):
         left_layout = QVBoxLayout(left_widget)
 
         # Morning session label
-        session_label = QLabel("MORNING SESSION")
-        session_label.setStyleSheet("color: white; font-size: 24pt;")
-        left_layout.addWidget(session_label)
+        # session_label = QLabel("MORNING SESSION")
+        # session_label.setStyleSheet("color: white; font-size: 24pt;")
+        # left_layout.addWidget(session_label)
 
         # Overall attendance counter – will be kept in sync with table data
         self.attendance_label = QLabel("0/0")
