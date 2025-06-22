@@ -184,7 +184,7 @@ def setup_rooms():
             "created_at": "2025-06-18 08:21:57.417",
             "updated_at": "2025-06-18 08:21:57.426",
             "gender": "Female",
-            "place": "0-Left",``
+            "place": "0-Left",
         },
         {
             "unique_id": "01978221-769d-768f-894e-e833a9cbcfd4",
@@ -224,7 +224,7 @@ def setup_rooms():
         },
         {
             "unique_id": "01978221-9589-726c-98d8-64b502ca02dc",
-            "room_name": "Chetak",
+            "room_name": "Tejas",
             "warden_name": None,
             "created_at": "2025-06-18 08:22:08.521",
             "updated_at": "2025-06-18 08:22:08.522",
