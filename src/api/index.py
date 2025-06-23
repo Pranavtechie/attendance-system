@@ -5,13 +5,13 @@ from urllib.parse import urlparse
 
 import pytz
 import requests as req
-from flask import Flask, jsonify, request
+from flask import Flask, request
 from flask_cors import CORS
 from uuid_extensions import uuid7str
 
 from src.config import ENROLLMENT_IMAGES_DIR
 from src.core.enrollment_processor import enroll_user
-from src.db.index import CadetAttendance, Person, Room, Session, db
+from src.db.index import CadetAttendance, Person, Room, db
 from src.ipc.socket_server import (  # IPC helper
     broadcast_message,
     register_event_handler,

@@ -1,4 +1,3 @@
-import os
 import time
 
 import cv2
@@ -15,9 +14,6 @@ from src.core.face_utils import (
     save_faiss_data,
 )
 from src.db.index import Person, db
-
-# --- Face Preprocessing and Post-processing Functions ---
-
 
 # --- Database & FAISS Setup ---
 

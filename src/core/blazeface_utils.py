@@ -12,7 +12,7 @@ from mediapipe.tasks.python.vision.face_detector import (
     FaceDetectorOptions,
 )
 
-from src.config import BLAZEFACE_INPUT_SIZE, MIN_DETECTION_SCORE, ROOT_DIR
+from src.config import BLAZEFACE_INPUT_SIZE, BLAZEFACE_MODEL_PATH, MIN_DETECTION_SCORE
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ def _get_face_detector() -> FaceDetector:
     """Lazily create a singleton MediaPipe FaceDetector instance."""
     global _face_detector
     if _face_detector is None:
-        model_path = str(ROOT_DIR / "detector.tflite")
+        model_path = str(BLAZEFACE_MODEL_PATH)
         options = FaceDetectorOptions(
             base_options=BaseOptions(model_asset_path=model_path),
             running_mode=RunningMode.IMAGE,

@@ -5,7 +5,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 
 CORE_DIR = ROOT_DIR / "src" / "core"
 
-BLAZEFACE_MODEL_PATH = CORE_DIR / "face_detection_front.tflite"
+BLAZEFACE_MODEL_PATH = ROOT_DIR / "detector.tflite"
 MOBILEFACENET_MODEL_PATH = CORE_DIR / "mobilefacenet.tflite"
 
 DB_PATH = ROOT_DIR / "attendance_system.db"

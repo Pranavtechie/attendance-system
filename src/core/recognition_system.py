@@ -5,16 +5,12 @@ from typing import Optional, Tuple
 import cv2
 import faiss
 import numpy as np
-import tensorflow as tf
 from ai_edge_litert.interpreter import Interpreter
 
 import src.core.blazeface_utils as bf_utils
 from src.config import (
-    BLAZEFACE_INPUT_SIZE,
-    BLAZEFACE_MODEL_PATH,
     EMBEDDING_DIM,
     FAISS_INDEX_PATH,
-    MIN_DETECTION_SCORE,
     MOBILEFACENET_INPUT_SIZE,
     MOBILEFACENET_MODEL_PATH,
     RECOGNITION_THRESHOLD,
