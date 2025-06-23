@@ -13,7 +13,7 @@ logs/
 enrollment_images/
 
 # sqlite db
-attendance_system.db
+*.db
 *.db.bak
 
 .env
