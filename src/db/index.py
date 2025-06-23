@@ -1,6 +1,8 @@
 from peewee import CharField, DateTimeField, Model, SqliteDatabase
 
-db = SqliteDatabase("kcc.db")
+from src.config import DB_PATH
+
+db = SqliteDatabase(DB_PATH)
 
 
 class Person(Model):

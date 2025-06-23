@@ -9,8 +9,8 @@ BLAZEFACE_MODEL_PATH = CORE_DIR / "face_detection_front.tflite"
 MOBILEFACENET_MODEL_PATH = CORE_DIR / "mobilefacenet.tflite"
 
 DB_PATH = ROOT_DIR / "attendance_system.db"
-FAISS_INDEX_PATH = CORE_DIR / "faiss_index.bin"
-USER_ID_MAP_PATH = CORE_DIR / "faiss_user_id_map.npy"
+FAISS_INDEX_PATH = ROOT_DIR / "faiss_index.bin"
+USER_ID_MAP_PATH = ROOT_DIR / "faiss_user_id_map.npy"
 ENROLLMENT_IMAGES_DIR = ROOT_DIR / "enrollment_images"
 
 EMBEDDING_DIM = 192
