@@ -143,7 +143,7 @@ def enroll():
                 syncedAt=syncedAt,
             ).on_conflict_replace().execute()
         elif data["userType"] == "Employee":
-            print("\n\n usingi employee ")
+            print("\n\n using employee ")
             Person.insert(
                 uniqueId=data["personId"],
                 name=data["preferredName"],

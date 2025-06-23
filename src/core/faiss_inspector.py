@@ -5,6 +5,7 @@ import faiss
 import numpy as np
 
 from src.config import FAISS_INDEX_PATH, USER_ID_MAP_PATH
+from src.db.index import Person, db
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,29 @@ def list_faiss_entries(
 if __name__ == "__main__":
     total, ids = list_faiss_entries()
     print(f"Total entries in FAISS index: {total}")
-    if ids:
-        print("Unique IDs:")
-        for idx, uid in enumerate(ids):
-            print(f"  {idx}: {uid}")
-    else:
+
+    if not ids:
         print("No entries found.")
+
+    # ------------------------------------------------------------------
+    # Fetch names corresponding to each uniqueId from the SQLite database
+    # ------------------------------------------------------------------
+    try:
+        if db.is_closed():
+            db.connect(reuse_if_open=True)
+
+        query = Person.select(Person.uniqueId, Person.name).where(
+            Person.uniqueId.in_(ids)
+        )
+        id_to_name = {p.uniqueId: p.name for p in query}
+    except Exception as exc:
+        logging.error(f"Failed to fetch names from database: {exc}")
+        id_to_name = {}
+    finally:
+        if not db.is_closed():
+            db.close()
+
+    print("Entries (index: uniqueId - name):")
+    for idx, uid in enumerate(ids):
+        name = id_to_name.get(uid, "Unknown")
+        print(f"  {idx}: {uid} - {name}")

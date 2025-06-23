@@ -16,8 +16,8 @@ ENROLLMENT_IMAGES_DIR = ROOT_DIR / "enrollment_images"
 EMBEDDING_DIM = 192
 BLAZEFACE_INPUT_SIZE = (128, 128)
 MOBILEFACENET_INPUT_SIZE = (112, 112)
-RECOGNITION_THRESHOLD = 0.75
-MIN_DETECTION_SCORE = 0.7
+RECOGNITION_THRESHOLD = 0.84
+MIN_DETECTION_SCORE = 0.95
 
 SOCKET_PATH = Path("/tmp/app.sock")
 
@@ -31,3 +31,12 @@ LOG_DIR = ROOT_DIR / "logs"
 DEFAULT_LOG_FILE = LOG_DIR / "attendance-system.log"
 
 WAIT_TIME_AFTER_RECOGNITION_MS = 800  # Time (in milliseconds) to pause the camera feed after a successful recognition
+
+# -----------------------------------------------------------------------------
+# UI display toggles
+# -----------------------------------------------------------------------------
+
+# Set this to any Python truthy value (True, 1, "yes", etc.) to enable drawing
+# bounding boxes around detected faces in the PySide6 camera preview. Set to a
+# falsey value to hide them.
+SHOW_FACE_BOUNDING_BOX = True

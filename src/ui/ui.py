@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 # ------------------------------------------------------------------
 # Configurations
 # ------------------------------------------------------------------
-from config import WAIT_TIME_AFTER_RECOGNITION_MS
+from config import SHOW_FACE_BOUNDING_BOX, WAIT_TIME_AFTER_RECOGNITION_MS
 
 # Import recognition system functions
 from core.recognition_system import FaceRecognitionSystem
@@ -257,8 +257,19 @@ class AttendanceUI(QMainWindow):
 
             # Only run face detection if system is ready
             if self.recognition_system_loaded:
-                # Delegate detection and recognition
-                detected_name = self.detect_and_recognize_faces(frame_rgb)
+                # Delegate detection and recognition (now returns (name, bbox))
+                result = self.detect_and_recognize_faces(frame_rgb)
+
+                if isinstance(result, tuple):
+                    detected_name, bbox = result
+                else:
+                    detected_name = result
+                    bbox = None
+
+                # Draw bounding box if enabled in config and coordinates available
+                if SHOW_FACE_BOUNDING_BOX and bbox is not None:
+                    x1, y1, x2, y2 = bbox
+                    cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
                 # Update UI based on detection results
                 if detected_name not in [
