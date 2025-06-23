@@ -19,3 +19,9 @@ enrollment_images/
 *.db.bak
 
 .env
+
+*.log  
+
+
+faiss_index.bin
+faiss_user_id_map.npy

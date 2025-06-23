@@ -21,7 +21,7 @@ from src.db.index import Person, db
 def enroll_user(unique_id, image_path):
     """
     Enroll a user using their unique_id and image path.
-    The cadet must already exist in the database.
+    The person must already exist in the database.
     """
     # Load (or initialise) the MobileFaceNet model once
     mobilefacenet_tflite = get_mobilefacenet_model()
@@ -31,13 +31,15 @@ def enroll_user(unique_id, image_path):
         db.connect(reuse_if_open=True)
 
     try:
-        # Check if cadet exists in database
-        cadet = Person.get_or_none(Person.uniqueId == unique_id)
-        if not cadet:
-            print(f"Error: No cadet found with unique_id: {unique_id}")
+        # Check if person exists in database
+        person_data = Person.get_or_none(Person.uniqueId == unique_id)
+        if not person_data:
+            print(f"Error: No person found with unique_id: {unique_id}")
             return False
 
-        print(f"Enrolling cadet: {cadet.name} (ID: {unique_id}) from {image_path}")
+        print(
+            f"Enrolling Person: {person_data.name} (ID: {unique_id}) from {image_path}"
+        )
 
         image = cv2.imread(image_path)
         if image is None:
@@ -98,7 +100,7 @@ def enroll_user(unique_id, image_path):
 
         # Check if this unique_id is already enrolled
         if unique_id in unique_id_map:
-            print(f"Warning: Cadet {unique_id} is already enrolled. Skipping.")
+            print(f"Warning: Person {unique_id} is already enrolled. Skipping.")
             return False
 
         faiss_index.add(embedding.reshape(1, -1))  # Add the embedding to FAISS
@@ -108,7 +110,7 @@ def enroll_user(unique_id, image_path):
 
         save_faiss_data(faiss_index, unique_id_map)
 
-        print(f"Enrollment successful for {cadet.name} (unique_id: {unique_id}).")
+        print(f"Enrollment successful for {person_data.name} (unique_id: {unique_id}).")
         return True
 
     except Exception as e:
